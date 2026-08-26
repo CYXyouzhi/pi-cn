@@ -1,0 +1,5 @@
+node_modules/
+*.bak
+*.map
+.DS_Store
+.pis-*

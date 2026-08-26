@@ -1,0 +1,163 @@
+/**
+ * pi-plan-mode 与 pi-tui-kit 的 TUI 界面汉化映射数据
+ *
+ * 只覆盖【用户可见】的界面文字；给 AI 的内容（工具描述、系统提示、校验错误、子命令描述）一律不收录。
+ * 规则：菜单选项 label 保留英文 + 中文括号注释；标题/说明/状态行/底部提示直接中文化；逻辑标识不动。
+ */
+
+// ---------- pi-plan-mode 菜单界面（dist/chunks/interactive-ui-*.js） ----------
+export const PLAN_MODE_UI_MAP: Array<[string, string]> = [
+  // 标题
+  ['title: "Export plan"', 'title: "导出计划"'],
+  ['title: "Active implementation plan"', 'title: "进行中的实施计划"'],
+  ['title: "Plan mode"', 'title: "计划模式"'],
+  ['title: "Proposed plan ready. What next?"', 'title: "方案已就绪。接下来做什么？"'],
+  ['title: "Choose Plan policy allowlist"', 'title: "选择计划策略白名单"'],
+  ['title: "How Plan mode works"', 'title: "计划模式如何工作"'],
+  ['title: "Saved plan"', 'title: "已保存的方案"'],
+  ['title: "Plan Mode Settings"', 'title: "计划模式设置"'],
+  ['title: "Default Plan policy allowlist"', 'title: "默认计划策略白名单"'],
+
+  // 选项 label（英文保留 + 中文注释；old/new 都带双引号，避免与代码标识符/新文本重叠）
+  ['"Show active implementation plan"', '"Show active implementation plan（查看进行中的实施计划）"'],
+  ['"Export plan\\u2026"', '"Export plan\\u2026（导出计划）"'],
+  ['"Start a new plan"', '"Start a new plan（开始新计划）"'],
+  ['"Clear active implementation plan"', '"Clear active implementation plan（清除进行中的实施计划）"'],
+  ['"Show latest proposed plan"', '"Show latest proposed plan（查看最新提议方案）"'],
+  ['"Implement here"', '"Implement here（在此处实施）"'],
+  ['"Start fresh and implement"', '"Start fresh and implement（全新开始并实施）"'],
+  ['"Save for later"', '"Save for later（稍后保存）"'],
+  ['"Stay in Plan mode"', '"Stay in Plan mode（留在计划模式）"'],
+  ['"Discard plan and exit"', '"Discard plan and exit（放弃方案并退出）"'],
+  ['"Request final plan"', '"Request final plan（请求最终方案）"'],
+  ['"Exit Plan mode"', '"Exit Plan mode（退出计划模式）"'],
+  ['"Start Plan mode"', '"Start Plan mode（开始计划模式）"'],
+  ['"Choose tools, then start\\u2026"', '"Choose tools, then start\\u2026（选择工具，然后开始）"'],
+  ['"Settings"', '"Settings（设置）"'],
+  ['"How Plan mode works"', '"How Plan mode works（计划模式如何工作）"'],
+  ['"Show saved plan"', '"Show saved plan（查看已保存的方案）"'],
+  ['"Clear saved plan"', '"Clear saved plan（清除已保存的方案）"'],
+  ['"Plan thinking"', '"Plan thinking（计划思考）"'],
+  ['"Plan policy tools"', '"Plan policy tools（计划策略工具）"'],
+  ['"Plan reinjection"', '"Plan reinjection（计划重新注入）"'],
+  ['"Export destination"', '"Export destination（导出位置）"'],
+  ['"Plan mode shortcut"', '"Plan mode shortcut（计划模式快捷键）"'],
+  ['"Use automatic safe built-ins"', '"Use automatic safe built-ins（使用自动安全内置工具）"'],
+  ['"Done \\u2014 start with this policy"', '"Done \\u2014 start with this policy（完成 — 以此策略开始）"'],
+  ['"Automatic safe built-ins"', '"Automatic safe built-ins（自动安全内置工具）"'],
+  ['"No optional tools"', '"No optional tools（无可选工具）"'],
+
+  // 说明 description（直接中文）
+  ["Continue in this session with the planning conversation.", "在当前会话中继续，保留规划对话。"],
+  ["Open a new linked session; transfer only the approved plan.", "打开一个新的关联会话；只转移已批准的方案。"],
+  ["Set the thinking level when the next Plan workflow starts.", "设置下一个计划工作流启动时的思考级别。"],
+  ["Choose which already-active tools Plan mode may execute by default.", "选择计划模式默认可执行的已激活工具。"],
+  ["Choose how long Plan mode restores the exact plan when ordinary context no longer contains it.", "选择当普通上下文不再包含方案时，计划模式恢复该方案的时长。"],
+  ["Set the destination used when an export omits its path.", "设置导出未指定路径时使用的位置。"],
+  ["Set the global shortcut used to toggle Plan mode.", "设置用于切换计划模式的全局快捷键。"],
+
+  // 说明行 lines（直接中文）
+  ["Existing paths are never overwritten.", "已存在的路径不会被覆盖。"],
+  ["Default: ${destination.configuredPath}", "默认：${destination.configuredPath}"],
+  ["Resolves to: ${destination.resolvedPath}", "解析为：${destination.resolvedPath}"],
+  ["Implement here keeps this planning conversation.", "在此处实施会保留本次规划对话。"],
+  ["Start fresh transfers only the approved plan to a new session.", "全新开始只把已批准的方案转移到新会话。"],
+  ["Policy changes apply only when you start Plan mode; first use may also reveal Plan helpers.", "策略更改仅在启动计划模式时生效；首次使用可能还会显示计划辅助。"],
+  ["Only tools already active in Pi can be allowed; non-built-ins run at user risk.", "只能允许 Pi 中已激活的工具；非内置工具风险自负。"],
+  ["Plan mode uses read-only exploration to understand the project before implementation.", "计划模式使用只读探索来在实施前了解项目。"],
+  ["The agent can ask important decision questions, then returns a complete implementation-ready plan.", "代理会提出关键决策问题，然后返回完整的可实施方案。"],
+  ["File mutation stays blocked until you explicitly choose to implement the completed plan.", "在您明确选择实施完成的方案之前，文件修改保持被阻止。"],
+  ["${options.statusText} Use /plan show, /plan implement, /plan export, or /plan exit.", "${options.statusText} 使用 /plan show、/plan implement、/plan export 或 /plan exit。"],
+  ["Changes apply when a later Plan workflow starts; model-visible tools stay unchanged.", "更改在后续计划工作流启动时生效；模型可见工具保持不变。"],
+  ["Configured: ${destination.configuredPath}", "已配置：${destination.configuredPath}"],
+  ["Resolves here to: ${destination.resolvedPath}", "在此解析为：${destination.resolvedPath}"],
+  ["Submit an empty value to reset to PLAN.md. Changes affect the next export.", "提交空值可重置为 PLAN.md。更改影响下次导出。"],
+  ['Configured: ${configuredPlanModeToggleShortcut(state.settings) ?? "none"}', '已配置：${configuredPlanModeToggleShortcut(state.settings) ?? "none"}'],
+  ["Use Pi key identifiers.", "使用 Pi 的按键标识符。"],
+  ["Submit an empty value to clear the shortcut.", "提交空值可清除快捷键。"],
+  ["When unset, Plan mode has no global shortcut.", "未设置时，计划模式没有全局快捷键。"],
+  ["User settings \\xB7 ${safeTerminalText(settingsPath)}", "用户设置 · ${safeTerminalText(settingsPath)}"],
+  ["Plan defaults apply to the next workflow; reinjection and export choices apply to their next action.", "计划默认值应用于下一个工作流；重新注入和导出选择应用于其下一次操作。"],
+  ["Plan Mode Settings \\xB7 Read only", "计划模式设置 · 只读"],
+  ["Invalid settings file. Fix ${safeTerminalText(settingsPath)} before saving.", "设置文件无效。请在保存前修复 ${safeTerminalText(settingsPath)}。"],
+  ["The settings file is invalid.", "设置文件无效。"],
+  ["${configured.length} selected", "已选择 ${configured.length} 个"],
+  ["not active in this Pi session", "未在本 Pi 会话中激活"],
+  ["No description available", "无可用描述"],
+  ["Not active in Pi; Plan mode will not activate it", "未在 Pi 中激活；计划模式不会激活它"],
+  ["Blocked by Plan-mode policy", "被计划模式策略阻止"],
+  ["unavailable \\xB7 Retained in settings but unavailable in this session", "不可用 · 保留在设置中但本会话不可用"],
+  ["unavailable retained settings", "不可用的保留设置"],
+  ["Unavailable in this session; reset defaults to remove unavailable names", "本会话不可用；重置默认值可移除不可用名称"],
+
+  // 通知消息（设置操作反馈，用户可见）
+  ["Plan mode thinking level: ${value}. Applies to the next Plan workflow.", "计划模式思考级别：${value}。应用于下一个计划工作流。"],
+  ["Plan reinjection: ${retentionLabel(implementationPlanRetention)}. Applies to the next Implement action.", "计划重新注入：${retentionLabel(implementationPlanRetention)}。应用于下一次实施操作。"],
+  ["Default Plan export destination: ${safeTerminalText(defaultPlanExportPath)}.", "默认计划导出位置：${safeTerminalText(defaultPlanExportPath)}。"],
+  ["Default Plan export destination reset to PLAN.md.", "默认计划导出位置已重置为 PLAN.md。"],
+  ["Invalid key identifier: ${safeTerminalText(raw)}. Use Pi key identifiers like ctrl+alt+p.", "无效的按键标识符：${safeTerminalText(raw)}。请使用如 ctrl+alt+p 的 Pi 按键标识符。"],
+  ["Plan mode shortcut: ${safeTerminalText(toggleShortcut)}.", "计划模式快捷键：${safeTerminalText(toggleShortcut)}。"],
+  ["Plan mode shortcut cleared (no global shortcut).", "计划模式快捷键已清除（无全局快捷键）。"],
+  ["Default Plan-mode tools: automatic safe built-ins.", "默认计划模式工具：自动安全内置工具。"],
+  ["Could not save Plan mode settings; the previous value remains: ${safeTerminalText(formatError(error))}", "无法保存计划模式设置；保留原值：${safeTerminalText(formatError(error))}"],
+];
+
+// ---------- pi-plan-mode 状态/通知（dist/index.ts） ----------
+export const PLAN_MODE_STATUS_MAP: Array<[string, string]> = [
+  // statusText（菜单状态行，用户可见）
+  ["Status: Off \\u2014 visible Plan helpers stay inactive until /plan starts.", "状态：关闭 — 可见的计划辅助在 /plan 启动前保持不活跃。"],
+  ["Status: Off \\u2014 required Plan helpers are unavailable under the active tool policy.", "状态：关闭 — 在当前工具策略下所需计划辅助不可用。"],
+  ['Plan policy will allow: ${allowed.length > 0 ? allowed.join(", ") : "none"}.', '计划策略将允许：${allowed.length > 0 ? allowed.join(", ") : "none"}。'],
+
+  // 状态提示（用户可见）
+  ["Plan mode: planning", "计划模式：规划中"],
+  ["Finish with plan_mode_complete when decision-ready.", "决策就绪时用 plan_mode_complete 完成。"],
+  ["Proposed plan ready", "方案已就绪"],
+  ["Use /plan to implement, save, revise, or exit Plan mode.", "使用 /plan 实施、保存、修订或退出计划模式。"],
+  ["Plan saved for later", "方案已保存"],
+  ["Use /plan to show, implement, or clear it.", "使用 /plan 查看、实施或清除。"],
+  ["Implementation plan active", "实施计划进行中"],
+  ["Use /plan to show, replace, or clear it.", "使用 /plan 查看、替换或清除。"],
+  ["A plan is saved for later.", "已保存一个方案。"],
+  ["An implementation plan is active.", "一个实施计划正在进行中。"],
+  ["Plan mode is off.", "计划模式已关闭。"],
+  ["Plan mode is active and a proposed plan is ready. ${toolSummary()}", "计划模式已激活且方案已就绪。${toolSummary()}"],
+  ["Plan mode is active. ${toolSummary()} Explore, ask, and finish with plan_mode_complete when decision-ready.", "计划模式已激活。${toolSummary()} 探索、提问，并在决策就绪时用 plan_mode_complete 完成。"],
+
+  // footer 状态标签
+  ["plan ready", "方案就绪"],
+  ["plan active", "方案进行中"],
+  ["plan saved", "方案已保存"],
+  ["plan implementing", "方案实施中"],
+
+  // 显示标题
+  ["Proposed Plan", "提议方案"],
+  ["Saved Plan", "已保存方案"],
+  ["Active Implementation Plan", "进行中的实施计划"],
+  ["Plan question", "计划问题"],
+  ["Complete plan", "完成方案"],
+
+  // 通知（用户可见）
+  ["Plan mode enabled. I will explore and plan, but not modify files.", "计划模式已启用。我将探索和规划，但不修改文件。"],
+  ["Plan mode disabled.", "计划模式已禁用。"],
+  ["Plan mode is already active.", "计划模式已激活。"],
+  ["Toggle Plan mode", "切换计划模式"],
+  ["Plan mode is not active. Use /plan first.", "计划模式未激活。请先使用 /plan。"],
+  ["Plan saved for later. Plan mode disabled.", "方案已保存。计划模式已禁用。"],
+  ["Active implementation plan cleared.", "进行中的实施计划已清除。"],
+  ["Saved plan cleared.", "已保存的方案已清除。"],
+  ["Plan mode disabled. Proposed plan discarded.", "计划模式已禁用。提议方案已丢弃。"],
+  ["Plan mode enabled with the selected tools.", "计划模式已用所选工具启用。"],
+  ["Cannot start Plan mode: ${detail}.", "无法启动计划模式：${detail}。"],
+  ["Cannot ${action} while an agent run is active. Wait for the run to settle, then retry.", "当代理运行处于活动状态时无法 ${action}。等待运行结束后重试。"],
+  ["Another workflow is active in this session. End it before starting Plan mode.", "本会话中有另一个工作流正在运行。先结束它再启动计划模式。"],
+  ['Plan policy allows: ${names.length > 0 ? names.join(", ") : "none"}. Model-visible tools stay unchanged.', '计划策略允许：${names.length > 0 ? names.join(", ") : "none"}。模型可见工具保持不变。'],
+];
+
+// ---------- pi-tui-kit 底部导航提示（dist/components/rendering.js） ----------
+export const TUI_KIT_MAP: Array<[string, string]> = [
+  ['confirmAction = "select"', 'confirmAction = "选择"'],
+  ['label: "navigate"', 'label: "导航"'],
+  ['label: destination,', 'label: destination === "close" ? "关闭" : destination === "back" ? "返回" : destination,'],
+  ['label: "close"', 'label: "关闭"'],
+];

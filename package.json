@@ -1,0 +1,12 @@
+{
+  "name": "pi-cn",
+  "version": "0.1.0",
+  "description": "Pi 中文汉化：/ 命令补全中文说明 + 使用频率排序 + 界面文本自动汉化（英文选项保留，注释变中文）",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "chinese", "i18n", "hanhua", "汉化"],
+  "files": ["index.ts", "lib.ts", "patches.ts", "plan-cn-data.ts", "goal-cn-data.ts", "btw-cn-data.ts", "README.md"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
