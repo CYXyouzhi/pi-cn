@@ -403,15 +403,77 @@ function isPiPlugin(pkgDir: string): boolean {
   }
 }
 
-function walkDist(dir: string, files: string[]): void {
+// 自动汉化扫描：跳过无关目录，避免扫入插件依赖/构建产物
+const AUTO_SKIP_DIRS = new Set(["node_modules", "test", "tests", "docs", "locales", ".git", ".pi", "scripts", "bundle", "vendor"]);
+
+function isSourceFile(name: string): boolean {
+  if (!name.endsWith(".js") && !name.endsWith(".ts")) return false;
+  if (name.endsWith(".bak") || name.endsWith(".map")) return false;
+  if (name.includes(".bundle.") || name.includes(".min.")) return false;
+  return true;
+}
+
+// 递归收集源码文件（跳过无关目录）
+function walkSourceDir(dir: string, files: string[]): void {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { walkDist(p, files); continue; }
-    if ((e.name.endsWith(".js") || e.name.endsWith(".ts")) && !e.name.endsWith(".bak") && !e.name.endsWith(".map")) {
-      files.push(p);
+    if (e.isDirectory()) {
+      if (AUTO_SKIP_DIRS.has(e.name)) continue;
+      walkSourceDir(p, files);
+      continue;
     }
+    if (isSourceFile(e.name)) files.push(p);
+  }
+}
+
+// 收集单个插件的可汉化源码文件，以 package.json 声明的 pi.extensions 入口为中心：
+// - 入口在 dist/ 内（编译产物模式，如 @narumitw 系列）→ 只扫 dist/，避免汉化到不被加载的 src/ 源码
+// - 入口为源码（如 ./index.ts、./src/index.ts）→ 扫入口所在目录及 pkgDir/src，跟随真实 import 链
+// - 无 pi.extensions 声明 → 兜底扫常见目录 + 包根目录
+function collectEntryFiles(pkgDir: string, files: string[]): void {
+  let entrySpecs: string[] = [];
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+    if (Array.isArray(pkg?.pi?.extensions)) {
+      entrySpecs = pkg.pi.extensions.filter((r): r is string => typeof r === "string");
+    }
+  } catch { /* 无 package.json 或解析失败 */ }
+
+  if (entrySpecs.length > 0) {
+    for (const rel of entrySpecs) {
+      const p = path.resolve(pkgDir, rel);
+      if (!fs.existsSync(p)) continue;
+      if (fs.statSync(p).isDirectory()) {
+        walkSourceDir(p, files); // 目录入口（如 ./extensions）：整个目录
+      } else if (isSourceFile(path.basename(p))) {
+        files.push(p); // 入口文件本身
+        const inDist = path.relative(pkgDir, p).split(path.sep)[0] === "dist";
+        if (inDist) {
+          walkSourceDir(path.join(pkgDir, "dist"), files); // 编译产物模式：只扫 dist
+        } else {
+          walkSourceDir(path.dirname(p), files); // 源码模式：入口所在目录（递归覆盖同目录及子目录模块）
+          const srcDir = path.join(pkgDir, "src");
+          if (path.resolve(srcDir) !== path.resolve(path.dirname(p)) && fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory()) {
+            walkSourceDir(srcDir, files); // 入口在根目录但 import src/（如 pi-tool-display）
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  // 兜底：无 pi.extensions 声明 → 扫常见目录 + 包根目录
+  for (const c of ["dist", "src", "extensions"]) {
+    const p = path.join(pkgDir, c);
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) walkSourceDir(p, files);
+  }
+  let entries;
+  try { entries = fs.readdirSync(pkgDir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.isDirectory()) continue;
+    if (isSourceFile(e.name)) files.push(path.join(pkgDir, e.name));
   }
 }
 
@@ -438,12 +500,13 @@ function enumeratePluginFiles(): string[] {
       }
     }
     for (const pkgDir of pkgDirs) {
-      if (!isPiPlugin(pkgDir)) continue;
-      const dist = path.join(pkgDir, "dist");
-      if (fs.existsSync(dist)) walkDist(dist, files);
+      if (path.basename(pkgDir) === "pi-cn") continue; // 排除自身
+      const hasPkg = fs.existsSync(path.join(pkgDir, "package.json"));
+      if (hasPkg && !isPiPlugin(pkgDir)) continue; // 有 package.json 但非 pi 插件（依赖）跳过
+      collectEntryFiles(pkgDir, files);
     }
   }
-  return files;
+  return [...new Set(files)]; // 去重（入口文件可能被目录递归重复收集）
 }
 
 function readAutoMap(): Record<string, Array<[string, string]>> {

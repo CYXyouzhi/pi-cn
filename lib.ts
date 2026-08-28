@@ -163,6 +163,26 @@ export const PLUGIN_CN: Record<string, string> = {
   "memory-pin": "固定一条常驻指令，注入到每个会话",
   "memory-index-sessions": "将过去的 Pi 会话导入搜索数据库",
 
+  // pi-workspace-history
+  undo: "撤销上一个代理回合并恢复工作区",
+  redo: "重做之前撤销的代理回合并恢复工作区",
+  checkpoint: "保存当前工作区状态为手动时间机器检查点",
+
+  // pi-tool-display
+  "tool-display": "配置工具输出渲染（OpenCode 风格）",
+
+  // @ff-labs/pi-fff
+  "fff-mode": "设置或显示 FFF 模式：/fff-mode [tools-and-ui | tools-only | override]",
+  "fff-health": "显示 FFF 文件查找器健康状态",
+  "fff-rescan": "触发 FFF 重新扫描文件",
+
+  // billion-context-pi（ACP 内核）
+  acp: "显示 ACP 上下文用量、token 分布和压缩状态",
+  "acp-status": "详细的 ACP 状态（块层级、token 分布、子代理用量）",
+  "acp-decompress": "还原压缩块的内容（块保持折叠）。用法：/acp-decompress b3",
+  "acp-search": "搜索压缩块摘要。用法：/acp-search auth token",
+  "acp-subagents": "把 ACP 上下文工具加入 pi-subagents 内置代理（一次性设置）。用法：/acp-subagents [installDir]",
+
   // llama.cpp
   llama: "管理 llama.cpp 路由模型（下载/加载/卸载）",
 

@@ -17,6 +17,10 @@ import {
   flowTranslate,
   clearFrequency,
   readFrequency,
+  readUserTable,
+  writeUserTable,
+  BUILTIN_CN,
+  PLUGIN_CN,
 } from "./lib.ts";
 import {
   findPiDist,
@@ -78,21 +82,38 @@ function withAnnotation(old: string, cn: string): string {
 
 type TranslateResult = { ok: true; lines: string[] } | { ok: false; reason: string };
 
-async function translateTexts(ctx: any, texts: string[]): Promise<TranslateResult> {
+async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" = "ui"): Promise<TranslateResult> {
   const registry = ctx?.modelRegistry;
   const model = ctx?.model ?? registry?.getAvailable?.()[0];
   if (!registry || !model) return { ok: false, reason: "没有可用模型（请先 /login 配置认证，或 /model 选择模型）" };
-  const prompt = [
-    "请把下面每一行英文界面文本翻译成简洁的中文（用于界面汉化的括号注释）。",
-    "规则：",
-    "1. 每行输入对应一行输出，按顺序一一对应，数量必须完全一致。",
-    "2. 只输出中文译文本身，不要编号、不要前缀、不要解释。",
-    "3. 保持简洁，一般不超过 12 个字。",
-    "4. 保留技术名词（token、RPC、API 等）不翻译。",
-    "",
-    ...texts,
-  ].join("\n");
-  try {
+
+  // 候选文本可能含换行（源码中的 \n 转义被解码为真实换行），必须单行化，
+  // 保证输入行数与条数一一对应（否则模型输出行数必然对不上）
+  const inputs = texts.map((t) => t.replace(/\s+/g, " ").trim());
+
+  const rules =
+    kind === "command"
+      ? [
+          "请把下面每一行英文命令说明翻译成简洁的中文（用于 / 命令补全注释）。",
+          "规则：",
+          "1. 每行输入对应一行输出，按顺序一一对应，数量必须完全一致。",
+          "2. 只输出中文译文本身，不要编号、不要前缀、不要解释。",
+          "3. 保留命令用法/参数示例（如 /bg [--agent] <命令>、--tokens 100k）不要改格式，只译其中的单词。",
+          "4. 保留技术名词（token、RPC、API、MCP 等）不翻译。",
+          "5. 禁止拆行、禁止合并、禁止输出空行。",
+        ]
+      : [
+          "请把下面每一行英文界面文本翻译成简洁的中文（用于界面汉化的括号注释）。",
+          "规则：",
+          "1. 每行输入对应一行输出，按顺序一一对应，数量必须完全一致。",
+          "2. 只输出中文译文本身，不要编号、不要前缀、不要解释。",
+          "3. 保持简洁，一般不超过 12 个字。",
+          "4. 保留技术名词（token、RPC、API 等）不翻译。",
+          "5. 禁止拆行、禁止合并、禁止输出空行。",
+        ];
+
+  const complete = async (extra: string): Promise<string[]> => {
+    const prompt = [...rules, extra, "", ...inputs].join("\n");
     const context = {
       systemPrompt: "你是专业的中文界面汉化翻译助手。",
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
@@ -102,14 +123,26 @@ async function translateTexts(ctx: any, texts: string[]): Promise<TranslateResul
       .filter((c: any) => c.type === "text")
       .map((c: any) => c.text)
       .join("");
-    const lines = text
+    return text
       .split("\n")
       .map((s: string) => s.replace(/^\s*\d+[.、）)]\s*/, "").trim())
       .filter(Boolean);
-    if (lines.length !== texts.length) {
-      return { ok: false, reason: `翻译结果行数不匹配（期望 ${texts.length} 行，得到 ${lines.length} 行）` };
+  };
+
+  try {
+    let lines = await complete("");
+    if (lines.length !== inputs.length) {
+      // 行数不符：明确告知模型后重试一次（模型偶发拆行/空行，重试通常可修正）
+      lines = await complete(
+        `注意：上次输出 ${lines.length} 行但输入是 ${inputs.length} 行。这次必须严格一行一条，数量完全一致，不要空行。`,
+      );
     }
-    return { ok: true, lines };
+    if (lines.length !== inputs.length) {
+      return { ok: false, reason: `翻译结果行数不匹配（期望 ${inputs.length} 行，得到 ${lines.length} 行）` };
+    }
+    // 译文强制单行（防止含换行破坏括号注释 / 源码语法）
+    const clean = lines.map((l) => l.replace(/\s+/g, " ").trim());
+    return { ok: true, lines: clean };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
@@ -156,6 +189,42 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
   } else {
     ctx.ui.notify(`✅ 已自动汉化 ${applied} 条界面文本。完全重启 Pi 后生效。`, "info");
   }
+
+  // 顺带：自动翻译新插件的命令说明（未收录的命令 → 写入用户表，立即生效）
+  await flowAutoTranslateCommands(ctx);
+}
+
+// ---------- /汉化 自动 内嵌：新命令自动翻译 ----------
+async function flowAutoTranslateCommands(ctx: any): Promise<void> {
+  let dynamic: { name: string; description?: string }[] = [];
+  try {
+    dynamic = piRef!.getCommands().map((c) => ({ name: c.name, description: c.description }));
+  } catch {
+    dynamic = [];
+  }
+  const user = readUserTable();
+  const untranslated = dynamic.filter(
+    (e) => !user[e.name] && !BUILTIN_CN[e.name] && !PLUGIN_CN[e.name],
+  );
+  if (untranslated.length === 0) return;
+
+  const texts = untranslated.map((e) => e.description ?? e.name);
+  const cns = await translateTexts(ctx, texts, "command");
+  if (!cns.ok) {
+    ctx.ui.notify(`⚠️ ${untranslated.length} 条命令说明翻译失败：${cns.reason}（可稍后用 /汉化 命令 手动补充）`, "warning");
+    return;
+  }
+  const table = { ...user };
+  let saved = 0;
+  untranslated.forEach((e, i) => {
+    const cn = (cns.lines[i] ?? "").trim();
+    if (!cn) return;
+    table[e.name] = cn;
+    saved++;
+  });
+  if (saved === 0) return;
+  writeUserTable(table);
+  ctx.ui.notify(`✅ 已自动翻译 ${saved} 条命令说明（新插件命令立即生效）。`, "info");
 }
 
 // ---------- /汉化 交互菜单（无参数时弹出） ----------
