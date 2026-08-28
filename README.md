@@ -17,7 +17,7 @@ pi install npm:pi-cn        # 发布到 npm 后
 pi install git:github.com/your-name/pi-cn@v1   # 发布到 GitHub 后
 ```
 
-安装后重启 Pi（或 `/reload`）。
+安装后重启 Pi 。
 
 ## 安全原则
 
