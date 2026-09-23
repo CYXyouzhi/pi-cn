@@ -29,8 +29,10 @@ import {
   collectAutoCandidates,
   applyAutoPairs,
   saveAutoPairs,
+  revertAllPatches,
   type PatchResult,
 } from "./patches.ts";
+import { runCheckup, formatCheckup } from "./checkup.ts";
 
 let piRef: ExtensionAPI | undefined;
 let patchNotice: string | undefined;
@@ -43,10 +45,7 @@ function collectResults(all: ReturnType<typeof applyAllPatches>) {
     all.planMode.ui,
     all.planMode.status,
     all.tuiKit,
-    all.goal.menu,
-    all.goal.settings,
-    all.goal.core,
-    all.goal.index,
+    all.goalX,
     all.btw,
     all.auto,
   ];
@@ -112,21 +111,49 @@ async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" 
           "5. 禁止拆行、禁止合并、禁止输出空行。",
         ];
 
-  const complete = async (extra: string): Promise<string[]> => {
-    const prompt = [...rules, extra, "", ...inputs].join("\n");
+  // 统一的模型调用：负责 reasoningEffort、错误检查、剥代码围栏。
+  // 关键：强制思考模型（如 zai 系 glm）不允许 thinking:disabled，
+  // 不传 reasoningEffort 时底层会拼出 thinking:{type:"disabled"} 而 400（code 1210），
+  // 导致 content 为空、行数解析得 0。传 "low" 让 zai 分支走 thinking:{type:"enabled"}。
+  const callModel = async (prompt: string): Promise<string> => {
     const context = {
       systemPrompt: "你是专业的中文界面汉化翻译助手。",
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
     };
-    const result = await registry.complete(model, context);
-    const text = (result.content ?? [])
+    const opts = (model as any)?.reasoning ? ({ reasoningEffort: "low" } as any) : undefined;
+    const result = await registry.complete(model, context, opts);
+    if (result?.stopReason === "error" || result?.errorMessage) {
+      // 把底层真实错误（认证/限流/参数 400 等）直接暴露出来，不再报成“0 行”
+      throw new Error(`模型调用失败（${result.stopReason ?? "unknown"}）：${result.errorMessage ?? "未知错误"}`);
+    }
+    // 剥掉 markdown 代码围栏与“翻译如下”类引导语，只留正文
+    return (result.content ?? [])
       .filter((c: any) => c.type === "text")
       .map((c: any) => c.text)
-      .join("");
+      .join("")
+      .replace(/```[a-zA-Z]*\n?/g, "")
+      .replace(/^\s*(翻译(结果)?|译文)(如下)?[:：]?\s*$/gm, "");
+  };
+
+  const complete = async (extra: string): Promise<string[]> => {
+    const prompt = [...rules, extra, "", ...inputs].join("\n");
+    const text = await callModel(prompt);
     return text
       .split("\n")
       .map((s: string) => s.replace(/^\s*\d+[.、）)]\s*/, "").trim())
       .filter(Boolean);
+  };
+
+  // 兑底：单条翻译（一次一行，行数天然一致）；空回复/失败时抛错由调用方处理
+  const completeOne = async (text: string): Promise<string> => {
+    const prompt = [
+      `把下面这句英文${kind === "command" ? "命令说明" : "界面文本"}翻译成简洁的中文（保留 token、RPC、API 等技术名词与 / 命令参数格式）。只输出译文本身，一行，不要编号、解释或代码围栏。`,
+      text,
+    ].join("\n");
+    const out = await callModel(prompt);
+    const first = out.split("\n").map((s: string) => s.trim()).filter(Boolean)[0] ?? "";
+    if (!first) throw new Error("空回复");
+    return first;
   };
 
   try {
@@ -138,7 +165,16 @@ async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" 
       );
     }
     if (lines.length !== inputs.length) {
-      return { ok: false, reason: `翻译结果行数不匹配（期望 ${inputs.length} 行，得到 ${lines.length} 行）` };
+      // 整批仍对不齐：降级为逐条翻译，单条失败保留英文原文，不让整批报废
+      const fallback: string[] = [];
+      for (const t of inputs) {
+        try {
+          fallback.push(await completeOne(t));
+        } catch {
+          fallback.push(t);
+        }
+      }
+      lines = fallback;
     }
     // 译文强制单行（防止含换行破坏括号注释 / 源码语法）
     const clean = lines.map((l) => l.replace(/\s+/g, " ").trim());
@@ -149,6 +185,19 @@ async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" 
 }
 
 async function flowAutoTranslate(ctx: any): Promise<void> {
+  // 先体检：把已有映射的风险挑出来（避免「翻译对了但功能坏了」），失败不阻断主流程
+  try {
+    const chk = runCheckup();
+    const dangers = chk.issues.filter((i) => i.kind === "compare");
+    if (dangers.length > 0) {
+      ctx.ui.notify(
+        `⚠️ 体检发现 ${dangers.length} 条映射参与逻辑比较，建议先 /汉化 体检 查看：\n` +
+          dangers.slice(0, 5).map((i) => `  · [${i.label}] ${i.key.slice(0, 46)}`).join("\n"),
+        "warning",
+      );
+    }
+  } catch { /* 体检失败不影响汉化 */ }
+
   const results = collectAutoCandidates();
   const allItems = results.flatMap((r) => r.items);
   if (allItems.length === 0) {
@@ -227,26 +276,57 @@ async function flowAutoTranslateCommands(ctx: any): Promise<void> {
   ctx.ui.notify(`✅ 已自动翻译 ${saved} 条命令说明（新插件命令立即生效）。`, "info");
 }
 
+// ---------- /汉化 体检 ----------
+async function flowCheckup(ctx: any): Promise<void> {
+  ctx.ui.notify("正在体检映射表…", "info");
+  try {
+    const r = runCheckup();
+    ctx.ui.notify(formatCheckup(r), r.issues.some((i) => i.kind === "compare") ? "warning" : "info");
+  } catch (e) {
+    ctx.ui.notify(`体检失败：${e instanceof Error ? e.message : String(e)}`, "error");
+  }
+}
+
+// ---------- /汉化 清除（还原英文） ----------
+async function flowRevert(ctx: any): Promise<void> {
+  const ok = await ctx.ui.confirm(
+    "确认还原？",
+    "将把所有已汉化的文件从 .bak 恢复成英文原版，并删除备份。\n下次启动 Pi 时 pi-cn 会重新应用汉化。",
+  );
+  if (!ok) return;
+  const r = revertAllPatches();
+  if (r.restored === 0) {
+    ctx.ui.notify("没有可还原的文件（可能尚未汉化，或备份已丢失）。", "info");
+    return;
+  }
+  ctx.ui.notify(
+    `✅ 已还原 ${r.restored} 个文件：\n${r.files.slice(0, 12).join("\n")}` +
+      (r.files.length > 12 ? `\n… 另有 ${r.files.length - 12} 个` : "") +
+      (r.skipped > 0 ? `\n\n跳过 ${r.skipped} 个（无备份）` : "") +
+      "\n\n重启 Pi 前界面仍显示中文（内存中的代码已加载）。",
+    "info",
+  );
+}
+
+// ---------- /汉化 频率 ----------
+async function flowClearFrequency(ctx: any): Promise<void> {
+  clearFrequency();
+  ctx.ui.notify("✅ 已清空命令使用频率，补全恢复按字母排序。", "info");
+}
+
 // ---------- /汉化 交互菜单（无参数时弹出） ----------
 async function flowHanhuaMenu(ctx: any): Promise<void> {
-  const pi = piRef!;
   const options = [
-    "自动汉化：扫描 + 翻译 + 应用（新插件自动加注释）",
-    "扫描界面：列出未汉化的英文文本",
-    "补充命令：为命令补全添加中文说明",
-    "界面状态：显示已汉化文件",
-    "界面应用：重新应用补丁",
+    "自动汉化：体检 + 扫描 + 翻译 + 应用",
+    "清除：还原所有汉化（恢复英文原版）",
     "清空频率：重置命令使用频率",
   ];
   const picked = await ctx.ui.select("选择汉化操作（↑↓ 选择，回车确认，esc 取消）：", options);
   if (!picked) return;
   const idx = options.indexOf(picked);
   if (idx === 0) return flowAutoTranslate(ctx);
-  if (idx === 1) return flowScanInterface(ctx);
-  if (idx === 2) return flowTranslate(ctx, pi);
-  if (idx === 3) return flowPatchCommand(["状态"], ctx);
-  if (idx === 4) return flowPatchCommand(["应用"], ctx);
-  if (idx === 5) return flowPatchCommand(["清空频率"], ctx);
+  if (idx === 1) return flowRevert(ctx);
+  if (idx === 2) return flowClearFrequency(ctx);
 }
 
 // ---------- /汉化界面 命令 ----------
@@ -328,23 +408,21 @@ export default async function (pi: ExtensionAPI) {
 
   // 3) 管理命令（单一入口）
   pi.registerCommand("汉化", {
-    description: "汉化管理：/汉化 [自动|扫描|命令|界面 状态|界面 应用|界面 清空频率]",
+    description: "汉化管理：/汉化 [自动|清除|频率|体检]",
     getArgumentCompletions: (prefix: string) => {
-      const subs = ["自动", "扫描", "命令", "界面 状态", "界面 应用", "界面 清空频率"];
+      const subs = ["自动", "清除", "频率", "体检"];
       const items = subs.map((value) => ({ value, label: value }));
       const filtered = items.filter((i) => i.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
     },
     handler: async (args: string, ctx: any) => {
-      const rest = args.trim().split(/\s+/).filter(Boolean);
-      const sub = (rest[0] ?? "").toLowerCase();
+      const sub = (args.trim().split(/\s+/)[0] ?? "").toLowerCase();
       if (!sub) return flowHanhuaMenu(ctx);
       if (sub === "自动") return flowAutoTranslate(ctx);
-      if (sub === "扫描") return flowScanInterface(ctx);
-      if (sub === "命令") return flowTranslate(ctx, pi);
-      if (sub === "界面") return flowPatchCommand(rest.slice(1), ctx);
-      // 兼容旧的直接子命令（状态/应用/清空频率）
-      return flowPatchCommand(rest, ctx);
+      if (sub === "清除") return flowRevert(ctx);
+      if (sub === "频率") return flowClearFrequency(ctx);
+      if (sub === "体检") return flowCheckup(ctx);
+      return flowHanhuaMenu(ctx);
     },
   });
 }
