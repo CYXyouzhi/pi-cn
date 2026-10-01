@@ -20,15 +20,18 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # 固定版本而不用 ubuntu-latest：latest 会在 2026-10-19 迁到 Ubuntu 26，
+    # 固定后 runner 环境变化不会静默影响发布
+    runs-on: ubuntu-24.04
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 配置 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          # Node 20 已于 2026-04 EOL；pi 本身要求 >= 22.19
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       # 防止「改了代码没改 version」或「tag 名写错」导致发布到错误版本号
