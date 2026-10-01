@@ -9,6 +9,9 @@
  * 原则：只改用户可见界面文字与补全提示；AI 可见内容与逻辑标识一律不动。
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { homedir } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   buildProvider,
@@ -58,6 +61,8 @@ function collectResults(all: ReturnType<typeof applyAllPatches>) {
 }
 
 // ---------- /汉化 扫描：列出界面未汉化文本 ----------
+// 完整清单写文件、通知只给摘要：pi 本体并入扫描后条目动辏数百条，
+// 塞进单条 notify 在 TUI 里必然显示不全——那正是以前「检测老是不完全」的观感来源之一。
 async function flowScanInterface(ctx: any): Promise<void> {
   const miss = collectAutoCandidates();
   if (miss.length === 0) {
@@ -65,13 +70,35 @@ async function flowScanInterface(ctx: any): Promise<void> {
     return;
   }
   const total = miss.reduce((n, r) => n + r.items.length, 0);
-  const lines: string[] = [`以下为尚未汉化的界面文本（共 ${total} 条，已排除 AI 内容）：`];
-  for (const r of miss) {
-    lines.push("");
-    lines.push(`▸ ${r.file.split(/[\\/]/).slice(-3).join("/")}（${r.items.length} 条，显示前 10 条）`);
-    for (const i of r.items.slice(0, 10)) lines.push(`  · ${i.display}`);
+  const ranked = miss.slice().sort((a, b) => b.items.length - a.items.length);
+
+  const dump: string[] = [
+    `# pi-cn 扫描结果  ${new Date().toISOString()}`,
+    `# 共 ${total} 条，来自 ${miss.length} 个文件`,
+    "",
+  ];
+  for (const r of ranked) {
+    dump.push(`▸ ${r.file}（${r.items.length} 条）`);
+    for (const i of r.items) dump.push(`  · ${i.display}`);
+    dump.push("");
   }
-  ctx.ui.notify(lines.join("\n"), "info");
+  const outFile = path.join(homedir(), ".pi", "agent", "pi-cn-scan.txt");
+  let saved = false;
+  try {
+    fs.writeFileSync(outFile, dump.join("\n"), "utf8");
+    saved = true;
+  } catch { /* 写盘失败时仍给摘要 */ }
+
+  const head = [
+    `扫描完成：${total} 条待汉化，分布在 ${miss.length} 个文件。`,
+    saved ? `完整清单：${outFile}` : "（清单写盘失败，只有下列摘要）",
+    "",
+    "条数最多的文件：",
+    ...ranked
+      .slice(0, 6)
+      .map((r) => `  ${String(r.items.length).padStart(4)}  ${r.file.split(/[\\/]/).slice(-2).join("/")}`),
+  ];
+  ctx.ui.notify(head.join("\n"), "info");
 }
 
 // ---------- /汉化 自动：扫描 + 翻译 + 应用 ----------
@@ -83,7 +110,8 @@ type TranslateResult = { ok: true; lines: string[] } | { ok: false; reason: stri
 
 async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" = "ui"): Promise<TranslateResult> {
   const registry = ctx?.modelRegistry;
-  const model = ctx?.model ?? registry?.getAvailable?.()[0];
+  // 始终使用当前选中的模型；取不到就报错，不悄悄换成其他 provider 的模型
+  const model = ctx?.model;
   if (!registry || !model) return { ok: false, reason: "没有可用模型（请先 /login 配置认证，或 /model 选择模型）" };
 
   // 候选文本可能含换行（源码中的 \n 转义被解码为真实换行），必须单行化，
@@ -120,7 +148,12 @@ async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" 
       systemPrompt: "你是专业的中文界面汉化翻译助手。",
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
     };
-    const opts = (model as any)?.reasoning ? ({ reasoningEffort: "low" } as any) : undefined;
+    // sessionId：opencode 系 provider 强制要求 x-opencode-session header，
+    // 传入后 pi-ai 会自动补上（其他 provider 会忽略该字段）
+    const opts = {
+      ...((model as any)?.reasoning ? { reasoningEffort: "low" as const } : {}),
+      sessionId: ctx?.sessionManager?.getSessionId?.(),
+    } as any;
     const result = await registry.complete(model, context, opts);
     if (result?.stopReason === "error" || result?.errorMessage) {
       // 把底层真实错误（认证/限流/参数 400 等）直接暴露出来，不再报成“0 行”

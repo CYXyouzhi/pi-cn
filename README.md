@@ -7,6 +7,7 @@
 - `/` 补全显示中文说明，新装的插件也会自动出现
 - 常用命令排前面（按使用次数）
 - `/model`、`/settings`、`/tree` 等界面文案变中文
+- 设置界面覆盖完整：设置项名称（`Warnings`、`Theme`、`Apply` 这类单个词）与子页面选项一并汉化
 - `/汉化` 是管理入口，`/汉化 体检` 检查映射有没有误伤代码
 
 ## 安装
@@ -21,14 +22,16 @@
 
     /汉化 自动     体检 + 扫描 + 翻译 + 应用
     /汉化 体检     检查映射风险
-    /汉化 扫描     列出还没汉化的界面文本
+    /汉化 扫描     列出还没汉化的界面文本（完整清单写入 pi-cn-scan.txt）
     /汉化 清除     还原英文
     /汉化 频率     清空使用统计
     /汉化 命令     手工补命令说明
 
 ## 覆盖范围
 
-主程序（`/model`、`/thinking`、`/settings`、`/tree`、`/resume`、`/trust`、启动画面、更新提示），`/plan`、`/goal`、`/btw` 三个插件，以及 pi-ui 通用组件。
+主程序（`/model`、`/thinking`、`/settings`、`/tree`、`/resume`、`/trust`、启动画面、更新提示），Pi 本体的设置界面与子页面（快捷键说明、设置项名称与当前值），`/plan`、`/goal`、`/btw` 三个插件，以及 pi-ui 通用组件。
+
+扫描目标是 Pi 安装目录本体（`dist/bundle/chunks`、`dist/core`、`dist/tools`）加已装插件。工具参数说明、遥测字段、枚举值与逻辑标识等「给模型或逻辑用」的文本会被自动排除，不会误译。
 
 ## 注意
 
@@ -36,11 +39,14 @@
 
 `/汉化 体检` 挑三类风险：字符串既用于显示又参与逻辑比较，替换后判断可能失效；短词误伤更长的文案；Pi 升级后失效的旧映射。
 
+翻译用当前选中的模型。当前模型若来自 opencode / opencode-go，请求会自动带上会话标识（该服务缺它会返回 400）。
+
 ## 数据文件
 
     ~/.pi/agent/commands-cn.json          命令中文说明
     ~/.pi/agent/commands-frequency.json   使用频率
     ~/.pi/agent/hanhua-auto.json          自动生成的映射
+    ~/.pi/agent/pi-cn-scan.txt            /汉化 扫描 的完整结果
     ~/.pi/agent/pi-cn.json                Pi 装在非默认路径时指定 piDist
 
 ## License

@@ -480,19 +480,83 @@ const ALL_HANHUA_PAIRS: Array<[string, string]> = [
 // ---------- 自动汉化：白名单上下文提取 + 动态映射 ----------
 // 只提取明确“界面位置”（label/title/hint/placeholder/ui.*）里的英文文本，
 // 天然避开给 AI 的 prompt 与工具定义（它们不经过这些界面 API）。
-const AUTO_CONTEXT_PATTERNS: RegExp[] = [
-  /label:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)/g,
-  /title:\s*("(?:\\.|[^"\\])*")/g,
-  /placeholder:\s*("(?:\\.|[^"\\])*")/g,
-  /ui\.notify\(\s*("(?:\\.|[^"\\])*")/g,
-  /ui\.confirm\(\s*("(?:\\.|[^"\\])*")/g,
-  /ui\.editor\(\s*("(?:\\.|[^"\\])*")/g,
-  /ui\.input\(\s*("(?:\\.|[^"\\])*")/g,
-  /ui\.select\(\s*("(?:\\.|[^"\\])*")/g,
-  /notifyTerminal\(\s*ctx\.ui,\s*("(?:\\.|[^"\\])*")/g,
+type AutoContextPattern = {
+  re: RegExp;
+  /**
+   * 允许「单个词」候选时的形态限制：
+   *   "capital" —— 仅首字母大写（label/title 的条目名，如 "Warnings"、"Tools"）
+   *   "any"     —— 不限大小写（currentValue 的当前值，如 "configure"）
+   * 未设置 —— 只收含空格的候选，用来避开逻辑值/枚举值（values:["default","none"]）。
+   * 单词候选一律只在 pi 本体生效：插件的 label 里混着设置键名
+   * （label:"autoSelectSingleGoal"）与枚举值（label:"OpenAI"），汉化会破坏读写。
+   */
+  single?: "capital" | "any";
+};
+
+const AUTO_CONTEXT_PATTERNS: AutoContextPattern[] = [
+  { re: /label:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)/g, single: "capital" },
+  { re: /title:\s*("(?:\\.|[^"\\])*")/g, single: "capital" },
+  { re: /placeholder:\s*("(?:\\.|[^"\\])*")/g, single: "capital" },
+  { re: /ui\.notify\(\s*("(?:\\.|[^"\\])*")/g },
+  { re: /ui\.confirm\(\s*("(?:\\.|[^"\\])*")/g },
+  { re: /ui\.editor\(\s*("(?:\\.|[^"\\])*")/g },
+  { re: /ui\.input\(\s*("(?:\\.|[^"\\])*")/g },
+  { re: /ui\.select\(\s*("(?:\\.|[^"\\])*")/g },
+  { re: /notifyTerminal\(\s*ctx\.ui,\s*("(?:\\.|[^"\\])*")/g },
 ];
 
+// 仅 pi 本体追加的规则：description / message / new Text / currentValue。
+// 为什么只给 pi 本体用：本体里这几类绝大多数是设置项、键位说明、状态提示
+// （实测能用 typebox / 遥测 schema 标记把其中的工具参数挑出去）；
+// 而第三方插件的 description 绝大多数是工具参数说明（pi-fff、pi-goal-x、
+// skill-tool 等），文本层面分不开——宁可漏译，也不能误译，
+// 误译会直接改变模型看到的参数语义。
+const AUTO_CONTEXT_PATTERNS_PI_ONLY: AutoContextPattern[] = [
+  { re: /description:\s*("(?:\\.|[^"\\])*")/g },
+  { re: /message:\s*("(?:\\.|[^"\\])*")/g },
+  { re: /new Text\(\s*("(?:\\.|[^"\\])*")/g },
+  // currentValue 是设置项的「当前值」显示文本（如 currentValue:"configure"），
+  // 与 values:[...] 里的枚举值不同：后者参与匹配、绝不能动，前者只用于显示。
+  { re: /currentValue:\s*("(?:\\.|[^"\\])*")/g, single: "any" },
+];
+
+// 明显的代码残片（正则跨引号匹配时的副产物，不是文案）：
+//   "),theme.fg(" / ";function makeX(...)" / "+memberName+"
+const CODE_FRAGMENT = /=>|\bfunction\b|\btheme\.|^\s*[;)]|\)\s*,|^\s*\+|\+\s*$/;
+// UI 文案极少超 160 字符，超过的基本是整段代码或模板残片。
+const MAX_DISPLAY_LENGTH = 160;
+
 const AUTO_FILE = path.join(homedir(), ".pi", "agent", "hanhua-auto.json");
+
+// 判断一处字符串是否位于「给模型的工具/参数 schema」里，而不是给人看的界面位置。
+//
+// 标记是怎么定出来的（把主 chunk 的实际上下文拉出来看的）：
+//   该译："app.clear":{defaultKeys:"ctrl+c",description:"Clear editor"}            ← 键位表
+//   不该译：bashSchema=typebox_exports.Object({command:typebox_exports.String({description:"Bash command to execute"})})
+//   不该译："pi.tool.call_id":{type:"string",required:!0,cardinality:"high",description:"Tool call id"}
+// 也就是说，工具 schema 与遥测属性 schema 的 description 前后必定带着上述结构标记，
+// 而界面文案旁边是 defaultKeys / label / title 这类 UI 字段——两者在文本层面可以分开。
+// 为何必须排除：这类文本一旦加上中文，模型读到的参数说明就变了，会改变工具调用行为。
+const TOOL_SCHEMA_MARKERS =
+  /typebox_exports\.|inputSchema|input_schema|outputSchema|output_schema|jsonSchema|parameters\s*[:=]|properties\s*[:=]|\bz\.object\(|Type\.Object\(|type\s*:\s*["'](?:string|number|boolean|object|array)["']|required\s*:\s*!|cardinality\s*:/;
+// 窗口取 300/400：标记在实测中都在 description 紧邻的几十字符内；
+// 向后必须给足——工具对象的形状是 {name, label, description, inputSchema}，
+// schema 标记在 label 之后，只看前文会把工具名 label（"bash"/"edit"）放进来。
+const TOOL_SCHEMA_WINDOW_BACK = 300;
+const TOOL_SCHEMA_WINDOW_FORWARD = 400;
+
+// 命令行参数说明的文本特征。
+// 插件（pi-fff、pi-goal-x 等）的工具参数常写成 CLI help 风格，且不在 typebox 结构里：
+//   "Path to the frecency database (overrides FFF_FRECENCY_DB env)"
+//   "-d, --db <path>  Path to ... (default true)"
+// 这类文本同样是给模型看的，汉化会改变工具调用语义，必须一并排除。
+const CLI_ARG_STYLE =
+  /(^|[\s(])(-[a-zA-Z],\s*)?--[a-zA-Z][\w-]*|<[a-z][\w-]*>|\(default[^)]{0,40}\)|overrides?\s+[A-Z][A-Z0-9_]{2,}|_[A-Z]{2,}\b|\$[A-Z][A-Z0-9_]{2,}/;
+
+function looksLikeToolSchemaText(src: string, index: number): boolean {
+  const from = Math.max(0, index - TOOL_SCHEMA_WINDOW_BACK);
+  return TOOL_SCHEMA_MARKERS.test(src.slice(from, index + TOOL_SCHEMA_WINDOW_FORWARD));
+}
 
 function decodeEscapes(s: string): string {
   return s
@@ -503,17 +567,29 @@ function decodeEscapes(s: string): string {
     .replace(/\\'/g, "'");
 }
 
-function extractAutoCandidates(src: string): Array<{ old: string; display: string }> {
+function extractAutoCandidates(src: string, piCore = false): Array<{ old: string; display: string }> {
   const out: Array<{ old: string; display: string }> = [];
   const seen = new Set<string>();
-  for (const re of AUTO_CONTEXT_PATTERNS) {
+  const patterns = piCore ? [...AUTO_CONTEXT_PATTERNS, ...AUTO_CONTEXT_PATTERNS_PI_ONLY] : AUTO_CONTEXT_PATTERNS;
+  for (const { re, single } of patterns) {
     let m;
     while ((m = re.exec(src))) {
       const quoted = m[1];
       const display = decodeEscapes(quoted.slice(1, -1));
       if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
+      // 给模型的工具/参数说明不得汉化（加了中文会改变工具调用语义）
+      if (looksLikeToolSchemaText(src, m.index)) continue;
+      if (CLI_ARG_STYLE.test(display)) continue;
+      if (CODE_FRAGMENT.test(display)) continue; // 正则跨引号匹配出的代码残片
+      if (display.length > MAX_DISPLAY_LENGTH) continue;
       if (!/[A-Za-z]/.test(display)) continue;
-      if (!/\s/.test(display)) continue; // 只保留含空格的多词（单词语通常为逻辑值/短标签）
+      if (!/\s/.test(display)) {
+        // 单词候选：只在 pi 本体、且形态符合时才收。
+        // 默认要求含空格，是为了避开逻辑值/枚举值（values:["default","none"]）。
+        const mode = piCore ? single : undefined;
+        if (!mode) continue;
+        if (mode === "capital" && !/^[A-Z]/.test(display)) continue;
+      }
       if (display.includes("${")) continue; // 动态模板跳过
       if (seen.has(quoted)) continue;
       seen.add(quoted);
@@ -536,6 +612,9 @@ function isPiPlugin(pkgDir: string): boolean {
 const AUTO_SKIP_DIRS = new Set(["node_modules", "test", "tests", "docs", "locales", ".git", ".pi", "scripts", "bundle", "vendor"]);
 
 function isSourceFile(name: string): boolean {
+  // .d.ts / .d.mts / .d.cts 是类型声明，不是可执行代码：
+  // 汉化它既无用（运行时读的是 .js），又会让候选清单堆满一堆永远无法应用的条目。
+  if (name.endsWith(".d.ts") || name.endsWith(".d.mts") || name.endsWith(".d.cts")) return false;
   if (!name.endsWith(".js") && !name.endsWith(".ts")) return false;
   if (name.endsWith(".bak") || name.endsWith(".map")) return false;
   if (name.includes(".bundle.") || name.includes(".min.")) return false;
@@ -606,6 +685,38 @@ function collectEntryFiles(pkgDir: string, files: string[]): void {
   }
 }
 
+// 沙箱/协议运行时文件：里面的文案是给模型或协议看的（codemode 脚本的报错、worker 内部消息），
+// 不是界面文案。这类文本没加中文的余地，加了反而让模型读到中文报错。整个文件不扫。
+// execute-*.js 的文件名带哈希，每次发版都变，所以用模式而不是固定文件名。
+const NON_UI_FILE = /^(codemode-worker|execute-[A-Z0-9]+)\.js$/i;
+
+// pi 本体（安装目录）里值得自动汉化的文件。
+// 为什么要单独收集：AUTO_SKIP_DIRS 把 bundle 排除在外（那是插件依赖/构建产物的常规规避），
+// 而 pi 本体的界面代码恰好全在 dist/bundle/chunks 与 dist/core 下。之前完全不扫本体，
+// 导致 /汉化 扫描 对本体的数百条界面文案永远 0 命中，只能靠手工表一条条补。
+function collectPiDistFiles(): string[] {
+  const dist = findPiDist();
+  if (!dist) return [];
+  const out: string[] = [];
+  for (const sub of [["bundle", "chunks"], ["core"], ["tools"]]) {
+    const root = path.join(dist, ...sub);
+    if (!fs.existsSync(root)) continue;
+    const walk = (d: string): void => {
+      let entries;
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walk(p); continue; }
+        if (!isSourceFile(e.name)) continue;
+        if (NON_UI_FILE.test(e.name)) continue;
+        out.push(p);
+      }
+    };
+    walk(root);
+  }
+  return out;
+}
+
 function enumeratePluginFiles(): string[] {
   const home = homedir();
   const roots = [
@@ -635,7 +746,8 @@ function enumeratePluginFiles(): string[] {
       collectEntryFiles(pkgDir, files);
     }
   }
-  return [...new Set(files)]; // 去重（入口文件可能被目录递归重复收集）
+  // 去重（入口文件可能被目录递归重复收集）；并把 pi 本体并入扫描目标
+  return [...new Set([...files, ...collectPiDistFiles()])];
 }
 
 function readAutoMap(): Record<string, Array<[string, string]>> {
@@ -657,10 +769,14 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
   const autoMap = readAutoMap();
   const autoOlds = new Set(Object.values(autoMap).flat().map(([old]) => old));
   const results: Array<{ file: string; items: Array<{ old: string; display: string }> }> = [];
+  // pi 本体路径只算一次：findPiDist 会遍历 argv 与若干候选目录，放进循环里会明显变慢。
+  const dist = findPiDist();
+  const distKey = dist ? path.resolve(dist).toLowerCase() : undefined;
   for (const file of files) {
     let src;
     try { src = fs.readFileSync(file, "utf8"); } catch { continue; }
-    const items = extractAutoCandidates(src).filter((c) => !staticOlds.has(c.old) && !autoOlds.has(c.old));
+    const piCore = !!distKey && path.resolve(file).toLowerCase().startsWith(distKey);
+    const items = extractAutoCandidates(src, piCore).filter((c) => !staticOlds.has(c.old) && !autoOlds.has(c.old));
     if (items.length > 0) results.push({ file, items });
   }
   return results;

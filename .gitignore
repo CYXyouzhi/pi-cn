@@ -1,5 +1,10 @@
 node_modules/
 *.bak
+*.old
+*.log
 *.map
 .DS_Store
 .pis-*
+*.pi-cn-check.*
+tmp-probe.ts
+pi-cn-*.tgz
