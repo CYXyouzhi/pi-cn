@@ -648,6 +648,36 @@ const AUTO_CONTEXT_PATTERNS_PI_ONLY: AutoContextPattern[] = [
   { re: /currentValue:\s*("(?:\\.|[^"\\])*")/g, single: "any" },
 ];
 
+/**
+ * 「显示文本参数位置」白名单（方案 B）。
+ *
+ * 主白名单（label: / description: / ui.*）覆盖不到渲染 API 的裸字符串参数，例如：
+ *     `${this.hint("tui.select.confirm", "save")} • ${this.hint("tui.select.cancel", "cancel")}`
+ * "save" / "cancel" 是给人看的按键提示，但既不以 label: 开头，也不含空格，
+ * 于是被两道规则同时挡在外面，永远扫不到。
+ *
+ * 这里的安全性来自「调用点」而不是字符串形态：下列 API 的指定参数只用于显示，
+ * 不可能参与逻辑判断，所以这一轮**允许短词**。
+ * 但短词额外加一道「同文件内必须唯一」的保护（见 extractAutoCandidates 第二轮）：
+ * 同一个词在文件里多处出现时，无法区分哪一处是显示、哪一处是逻辑值，宁可漏译。
+ *
+ * 每条 pattern 的捕获组 1 必须是「显示文本」那个字符串字面量。
+ */
+const UI_CALL_PATTERNS: RegExp[] = [
+  // hint(bindingId, text)：第二参数是显示文本，第一参数是键位 id（不能动）
+  /\bhint\(\s*"[^"]*"\s*,\s*("(?:\\.|[^"\\])*")/g,
+  // rawKeyHint(keyDisplay, text)：同上
+  /\brawKeyHint\(\s*[^,]+?,\s*("(?:\\.|[^"\\])*")/g,
+  // setWorkingMessage(text)：流式工作提示（"Working…"）
+  /\bsetWorkingMessage\(\s*("(?:\\.|[^"\\])*")/g,
+  // setHiddenThinkingLabel(text)：思考折叠块的标签
+  /\bsetHiddenThinkingLabel\(\s*("(?:\\.|[^"\\])*")/g,
+  // setStatus(statusId, text)：第二参数是显示文本，第一参数是状态槽标识（不能动）
+  /\bsetStatus\(\s*[^,]+?,\s*("(?:\\.|[^"\\])*")/g,
+  // setTitle(text)：标题
+  /\bsetTitle\(\s*("(?:\\.|[^"\\])*")/g,
+];
+
 // 明显的代码残片（正则跨引号匹配时的副产物，不是文案）：
 //   "),theme.fg(" / ";function makeX(...)" / "+memberName+"
 const CODE_FRAGMENT = /=>|\bfunction\b|\btheme\.|^\s*[;)]|\)\s*,|^\s*\+|\+\s*$/;
@@ -695,6 +725,14 @@ function decodeEscapes(s: string): string {
     .replace(/\\'/g, "'");
 }
 
+/** 统计字面量在源码里出现的次数（用于短词的唯一性保护） */
+function countIn(src: string, quoted: string): number {
+  let n = 0;
+  let i = -1;
+  while ((i = src.indexOf(quoted, i + 1)) !== -1) n++;
+  return n;
+}
+
 function extractAutoCandidates(src: string, piCore = false): Array<{ old: string; display: string }> {
   const out: Array<{ old: string; display: string }> = [];
   const seen = new Set<string>();
@@ -728,6 +766,33 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       out.push({ old: quoted, display });
     }
   }
+
+  // 第二轮：渲染 API 的「显示文本参数位置」（方案 B）。
+  // 与第一轮的区别：这一轮允许短词（不含空格的词，如 "save" / "cancel"）。
+  // 依据见 UI_CALL_PATTERNS 的注释；短词另加「同文件内唯一」保护。
+  for (const re of UI_CALL_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(src))) {
+      const quoted = m[1];
+      const display = decodeEscapes(quoted.slice(1, -1));
+      if (!display || /[\u4e00-\u9fff]/.test(display)) continue; // 空串 / 已汉化
+      if (display.includes("${")) continue;
+      if (!/[A-Za-z]/.test(display)) continue;
+      if (display.length > MAX_DISPLAY_LENGTH) continue;
+      if (CODE_FRAGMENT.test(display)) continue;
+      if (CLI_ARG_STYLE.test(display)) continue;
+      if (looksLikeToolSchemaText(src, m.index)) continue;
+      if (isExportedMember(src, m.index + m[0].indexOf(quoted))) continue;
+      // 短词（不含空格）必须在本文件内唯一：同词多处出现时无法区分
+      // 哪一处是显示、哪一处是逻辑值，宁可漏译。
+      if (!/\s/.test(display) && countIn(src, quoted) > 1) continue;
+      if (seen.has(quoted)) continue;
+      seen.add(quoted);
+      out.push({ old: quoted, display });
+    }
+  }
+
   return out;
 }
 
