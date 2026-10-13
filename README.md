@@ -46,19 +46,16 @@
 
 `/汉化` 不带参数会弹菜单，也可以直接指定：
 
-    /汉化 自动     体检 + 扫描 + 翻译 + 应用
-    /汉化 扫描     列出原始候选池（诊断用，零模型调用；其中多数不该汉化，清单写入 pi-cn-scan.txt）
+    /汉化 自动     体检 + 翻译 + 应用
     /汉化 体检     检查映射风险
-    /汉化 扫描     列出还没汉化的界面文本（完整清单写入 pi-cn-scan.txt）
     /汉化 清除     还原英文
     /汉化 频率     清空使用统计
-    /汉化 命令     手工补命令说明
 
 ## 覆盖范围
 
 主程序（`/model`、`/thinking`、`/settings`、`/tree`、`/resume`、`/trust`、启动画面、更新提示），Pi 本体的设置界面与子页面（快捷键说明、设置项名称与当前值），`/plan`、`/goal`、`/btw` 三个插件，以及 pi-ui 通用组件。
 
-扫描目标是 Pi 安装目录本体（`dist/bundle/chunks`、`dist/core`、`dist/tools`）加已装插件。工具参数说明、遥测字段、枚举值与逻辑标识等「给模型或逻辑用」的文本会被自动排除，不会误译。
+覆盖的是 Pi 安装目录本体（`dist/bundle/chunks`、`dist/core`、`dist/tools`）加已装插件。工具参数说明、遥测字段、枚举值与逻辑标识等「给模型或逻辑用」的文本会被自动排除，不会误译。
 
 ## 注意
 
@@ -74,7 +71,6 @@
     ~/.pi/agent/commands-frequency.json   使用频率
     ~/.pi/agent/hanhua-auto.json          模型翻译生成的映射
     ~/.pi/agent/pi-cn-locale.json         插件官方语言包生成的映射
-    ~/.pi/agent/pi-cn-scan.txt            /汉化 扫描 的完整结果
     ~/.pi/agent/pi-cn.json                Pi 装在非默认路径时指定 piDist
 
 ## License
