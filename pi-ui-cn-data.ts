@@ -20,7 +20,6 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"Always trust\"", "\"Always trust（总是信任）\""],
   ["\"Never trust\"", "\"Never trust（从不信任）\""],
   ["\"Anthropic extra usage\"", "\"Anthropic extra usage（Anthropic 额外用量）\""],
-  ["\"  Automatic\"", "\"  Automatic（自动）\""],
   ["\"Light theme\"", "\"Light theme（浅色主题）\""],
   ["\"Light Theme\"", "\"Light Theme（浅色主题）\""],
   ["\"Dark theme\"", "\"Dark theme（深色主题）\""],
@@ -48,6 +47,10 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"Fullscreen exit output\"", "\"Fullscreen exit output（全屏退出输出）\""],
   ["\"Fullscreen scrollbar\"", "\"Fullscreen scrollbar（全屏滚动条）\""],
   ["\"Fullscreen copy on select\"", "\"Fullscreen copy on select（全屏选中即复制）\""],
+  // 1.0.0 新增：全屏滚轮设置（标题与说明）
+  ["\"Fullscreen wheel scrolling\"", "\"Fullscreen wheel scrolling（全屏滚轮滚动）\""],
+  ["\"Automatically copy selected text in fullscreen mode; disable to copy selections with Ctrl+X\"", "\"Automatically copy selected text in fullscreen mode; disable to copy selections with Ctrl+X（全屏模式下自动复制选中的文本；关闭后可用 Ctrl+X 复制选中内容）\""],
+  ["\"Lines per mouse-wheel event in fullscreen mode; 'auto' speeds up fast wheel spins where the terminal does not\"", "\"Lines per mouse-wheel event in fullscreen mode; 'auto' speeds up fast wheel spins where the terminal does not（全屏模式下每次滚轮事件滚动的行数；'auto' 会在终端不提供快速滚动时加速连续滚轮）\""],
   ["\"Show images\"", "\"Show images（显示图片）\""],
   ["\"Image width\"", "\"Image width（图片宽度）\""],
   ["\"Auto-resize images\"", "\"Auto-resize images（自动缩放图片）\""],
@@ -114,7 +117,6 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"Resume cancelled\"", "\"Resume cancelled（恢复已取消）\""],
   ["\"Resumed session in current cwd\"", "\"Resumed session in current cwd（已在当前目录恢复会话）\""],
   ["\"Failed to resume session\"", "\"Failed to resume session（恢复会话失败）\""],
-  ["\"No subscription providers available.\"", "\"No subscription providers available.（没有可用的订阅提供商。）\""],
   ["\"No API key providers available.\"", "\"No API key providers available.（没有可用的 API Key 提供商。）\""],
   ["\"No login providers available.\"", "\"No login providers available.（没有可用的登录提供商。）\""],
   ["\"You can also use an AWS profile, IAM keys, or role-based credentials.\"", "\"You can also use an AWS profile, IAM keys, or role-based credentials.（你也可以使用 AWS 配置文件、IAM 密钥或基于角色的凭据。）\""],
@@ -162,9 +164,6 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"No providers available\"", "\"No providers available（没有可用的提供商）\""],
   ["\"No providers logged in. Use /login first.\"", "\"No providers logged in. Use /login first.（没有已登录的提供商，请先使用 /login。）\""],
   ["\"No matching providers\"", "\"No matching providers（没有匹配的提供商）\""],
-  ["\" \\u2022 unconfigured\"", "\" \\u2022 unconfigured（• 未配置）\""],
-  ["\"subscription configured\"", "\"subscription configured（订阅已配置）\""],
-  ["\"API key configured\"", "\"API key configured（API Key 已配置）\""],
   ["\" \\u2713 configured\"", "\" \\u2713 configured（✓ 已配置）\""],
   ["\"Cmd+click to open\"", "\"Cmd+click to open（Cmd+点击打开）\""],
   ["\"Ctrl+click to open\"", "\"Ctrl+click to open（Ctrl+点击打开）\""],
@@ -175,6 +174,9 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"GitHub CLI is not logged in. Run 'gh auth login' first.\"", "\"GitHub CLI is not logged in. Run 'gh auth login' first.（GitHub CLI 未登录，请先运行 'gh auth login'。）\""],
   ["\"GitHub CLI (gh) is not installed. Install it from https://cli.github.com/\"", "\"GitHub CLI (gh) is not installed. Install it from https://cli.github.com/（未安装 GitHub CLI (gh)，请从 https://cli.github.com/ 安装。）\""],
   ["\"Uploading to Radius...\"", "\"Uploading to Radius...（正在上传到 Radius…）\""],
+  // 1.0.0 新增：Radius 提供商（登录项与说明）
+  ["\"Radius API key\"", "\"Radius API key（Radius API 密钥）\""],
+  ["\"Radius is a service crafted for Pi by the builders of Pi, Earendil Works\"", "\"Radius is a service crafted for Pi by the builders of Pi, Earendil Works（Radius 是 Pi 的开发者 Earendil Works 为 Pi 打造的服务）\""],
   ["\"Share cancelled\"", "\"Share cancelled（分享已取消）\""],
   ["\"Pi session\"", "\"Pi session（Pi 会话）\""],
   ["\"Creating gist...\"", "\"Creating gist...（正在创建 gist…）\""],
@@ -202,7 +204,6 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\" [unavailable]\"", "\" [unavailable]（[不可用]）\""],
   ["\"Model unavailable\"", "\"Model unavailable（模型不可用）\""],
   ["\" default\"", "\" default（默认）\""],
-  ["\" \\xB7 default\"", "\" \\xB7 default（· 默认）\""],
   ["\"\\u25CB Current Folder | \"", "\"\\u25CB Current Folder（当前文件夹） | \""],
   ["\"\\u25C9 Current Folder\"", "\"\\u25C9 Current Folder（◉ 当前文件夹）\""],
   ["\" | \\u25CB All\"", "\" | \\u25CB All（| ○ 全部）\""],
@@ -238,7 +239,6 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["\"Global Resources\"", "\"Global Resources（全局资源）\""],
   ["\"switch mode\"", "\"switch mode（切换模式）\""],
   ["Welcome to ${APP_NAME}, the minimal coding agent.", "Welcome to ${APP_NAME}, the minimal coding agent.（欢迎使用 ${APP_NAME}，极简编码助手。）"],
-  ["Detected system appearance: ${this.options.detectedTheme}", "Detected system appearance: ${this.options.detectedTheme}（检测到的系统外观：${this.options.detectedTheme}）"],
   ["Session-only. ${keyDisplayText(\"app.models.save\")} to save to settings.", "Session-only. ${keyDisplayText(\"app.models.save\")} to save to settings.（仅本会话有效。按 ${keyDisplayText(\"app.models.save\")} 保存到设置。）"],
 
   // ---- 通知类模板串（整串匹配）----
@@ -250,23 +250,67 @@ export const UI_CN_MAP: Array<[string, string]> = [
   ["Model scope: ${modelList}${cycleHint}", "Model scope:（模型范围） ${modelList}${cycleHint}"],
   ["Tool output: ${expanded?\"expanded\":\"collapsed\"}", "Tool output:（工具输出） ${expanded?\"expanded\":\"collapsed\"}"],
   ["Thinking blocks: ${this.hideThinkingBlock?\"hidden\":\"visible\"}", "Thinking blocks:（思考块） ${this.hideThinkingBlock?\"hidden\":\"visible\"}"],
-  ["Logged in to ${providerName}", "Logged in to（已登录） ${providerName}"],
+  ["`Logged in to ${providerName}`", "`Logged in to（已登录） ${providerName}`"],
   ["Logged out of ${providerOption.name}", "Logged out of（已登出） ${providerOption.name}"],
-  ["Saved API key for ${providerName}", "Saved API key for（已保存 API Key） ${providerName}"],
-  ["Session exported to: ${filePath}", "Session exported to:（会话已导出到） ${filePath}"],
-  ["Session imported from: ${inputPath}", "Session imported from:（会话已从以下路径导入） ${inputPath}"],
+  ["`Saved API key for ${providerName}`", "`Saved API key for（已保存 API Key） ${providerName}`"],
+  ["`Session exported to: ${filePath}`", "`Session exported to:（会话已导出到） ${filePath}`"],
+  ["`Session imported from: ${inputPath}`", "`Session imported from:（会话已从以下路径导入） ${inputPath}`"],
   ["Session name: ${currentName}", "Session name:（会话名称） ${currentName}"],
-  ["Updating ${entry.source}...（正在更新 ${entry.source}...）", "Updating（正在更新） ${entry.source}...（正在更新 ${entry.source}...）"],
-  ["Installing ${source}...（正在安装 ${source}...）", "Installing（正在安装） ${source}...（正在安装 ${source}...）"],
-  ["Removing ${source}...（正在移除 ${source}...）", "Removing（正在移除） ${source}...（正在移除 ${source}...）"],
-  ["Refreshing ${sourceStr}...（正在刷新 ${sourceStr}...）", "Refreshing（正在刷新） ${sourceStr}...（正在刷新 ${sourceStr}...）"],
   ["Migrated credentials to auth.json: ${migratedProviders.join(\", \")}", "Migrated credentials to auth.json:（已将凭据迁移到 auth.json） ${migratedProviders.join(\", \")}"],
-  ["Could not refresh ${result.errors.keys().next().value}; showing cached models.（无法刷新 ${result.errors.keys().next().value}；显示缓存的模型。）", "Could not refresh（无法刷新） ${result.errors.keys().next().value}; showing cached models.（无法刷新 ${result.errors.keys().next().value}；显示缓存的模型。）"],
   ["Aborted after ${retryAttempt} retry attempt${retryAttempt>1?\"s\":\"\"}", "Aborted after（已中止，重试次数） ${retryAttempt} retry attempt${retryAttempt>1?\"s\":\"\"}"],
-  ["Session name was normalized from ${JSON.stringify(name)} to ${JSON.stringify(sessionName2)}", "Session name was normalized from（会话名称已规范化，原值） ${JSON.stringify(name)} to ${JSON.stringify(sessionName2)}"],
   ["Saved trust decision: ${selection.trusted?\"trusted\":\"untrusted\"}. Restart ${APP_NAME} for this to take effect.", "Saved trust decision:（已保存信任决定） ${selection.trusted?\"trusted\":\"untrusted\"}. Restart ${APP_NAME} for this to take effect."],
   // ---- 通知类动态前缀 ----
-  ["Could not refresh ", "Could not refresh（无法刷新） "],
+  // ---- 1.0.0 设置界面 / 登录菜单补漏 ----
+  ["\"Auto-compact\"", "\"Auto-compact（自动压缩）\""],
+  ["\"Transport\"", "\"Transport（传输方式）\""],
+  ["\"Theme\"", "\"Theme（主题）\""],
+  ["\"Apply\"", "\"Apply（应用）\""],
+  ["\"Bearer token\"", "\"Bearer token（Bearer 令牌）\""],
+  ["\"AWS profile\"", "\"AWS profile（AWS 配置档案）\""],
+  ["\"Existing AWS credential chain\"", "\"Existing AWS credential chain（现有 AWS 凭证链）\""],
+  ["\"Google Cloud API key\"", "\"Google Cloud API key（Google Cloud API 密钥）\""],
+  ["\"Application Default Credentials\"", "\"Application Default Credentials（应用默认凭证）\""],
+  ["\"Service account credentials file\"", "\"Service account credentials file（服务账号凭证文件）\""],
+  ["\"30 sec\"", "\"30 sec（30 秒）\""],
+  ["\"1 min\"", "\"1 min（1 分钟）\""],
+  ["\"2 min\"", "\"2 min（2 分钟）\""],
+  ["\"5 min\"", "\"5 min（5 分钟）\""],
+  ["\"Enable\"", "\"Enable（启用）\""],
+  ["\"Disable\"", "\"Disable（禁用）\""],
+  ["\"Sign in\"", "\"Sign in（登录）\""],
+  ["\"Sign out\"", "\"Sign out（登出）\""],
+  ["\"Reconnect\"", "\"Reconnect（重新连接）\""],
+  ["\"Exposure\"", "\"Exposure（曝光方式）\""],
+  ["\"System (matches your terminal colors)\"", "\"System (matches your terminal colors)（跟随终端配色）\""],
+  ["\"Dark\"", "\"Dark（深色）\""],
+  ["\"Light\"", "\"Light（浅色）\""],
+  ["\"Yes\"", "\"Yes（是）\""],
+  ["\"No\"", "\"No（否）\""],
+  ["\"Continue\"", "\"Continue（继续）\""],
+  ["\"Cancel\"", "\"Cancel（取消）\""],
+  ["\"Download model\\u2026\"", "\"Download model\\u2026（下载模型…）\""],
+  ["\"MCP servers\"", "\"MCP servers（MCP 服务器）\""],
+  ["\"Loading model\"", "\"Loading model（正在加载模型）\""],
+  ["\"Downloading model\"", "\"Downloading model（正在下载模型）\""],
+  ["\"Sign in with Kimi Code\"", "\"Sign in with Kimi Code（使用 Kimi Code 登录）\""],
+  ["\"Sign in with Meta\"", "\"Sign in with Meta（使用 Meta 登录）\""],
+  ["\"Sign in with ChatGPT\"", "\"Sign in with ChatGPT（使用 ChatGPT 登录）\""],
+  ["\"Sign in with OpenRouter\"", "\"Sign in with OpenRouter（使用 OpenRouter 登录）\""],
+  ["\"Sign in with SuperGrok or X Premium\"", "\"Sign in with SuperGrok or X Premium（使用 SuperGrok 或 X Premium 登录）\""],
+  ["\" \\u2022 not configured\"", "\" \\u2022 not configured（未配置）\""],
+  ["\"  automatic\"", "\"  automatic（自动）\""],
+  ["`Sign in with ${radiusOption.name}`", "`Sign in with ${radiusOption.name}（使用 Radius 登录）`"],
+  ["\"<provider/model>\"", "\"<provider/model>（提供商/模型）\""],
+  ["\"<level>\"", "\"<level>（级别）\""],
+  ["\"<description>\"", "\"<description>（描述）\""],
+  ["\"<provider>\"", "\"<provider>（提供商）\""],
+  // 启动画面引导语。源码位于 theme.fg("dim", "Pi can explain …")，参数是裸字符串，
+  // 不落在白名单上下文（label: / description: / ui.*）里，自动扫描扫不到，只能手写。
+  // 整句唯一，带引号即可安全匹配。
+  [
+    "\"Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.\"",
+    "\"Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.（Pi 能解释自身功能并查阅自己的文档。可以问它如何使用或扩展 Pi。）\"",
+  ],
 ];
 
 // ---------- 半截拼接句 ----------
@@ -289,9 +333,33 @@ export const UI_FRAG_MAP: Array<[string, string]> = [
   ["\"to run bash (no context)\"", "\"to run bash (no context)（运行 bash（无上下文））\""],
   ["\"to queue follow-up\"", "\"to queue follow-up（排队后续消息）\""],
   ["\"to edit all queued messages\"", "\"to edit all queued messages（编辑所有排队消息）\""],
-  ["\"to paste image (with text fallback)\"", "\"to paste image (with text fallback)（粘贴图片（文本回退））\""],
   ["\"drop files\"", "\"drop files（拖放文件）\""],
   ["\"to attach\"", "\"to attach（附加）\""],
   ["\"to collapse\"", "\"to collapse（折叠）\""],
   ["\"to expand\"", "\"to expand（展开）\""],
+  // 全屏模式下滚动到末尾时浮出的提示（模板串中间片段：前面是“↓ ”+ 空格，后面紧跟 ${shortcut} 插值，
+  // 所以只能取纯 ASCII 的这段文字，避开 \u2193 / \xB7 转义与嵌套模板串）
+  ["Jump to latest message", "Jump to latest message（跳到最新消息）"],
+
+  // ---------- 启动画面紧凑提示行 ----------
+  // 未展开启动画面时的那一行：
+  //   escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+  // 这一批词与上面的展开版是两套不同字符串：展开版是 "to interrupt" / "for commands"
+  // / "to run bash"，紧凑版是去掉前缀的裸词 "interrupt" / "commands" / "bash" / "more"。
+  //
+  // 为何要带函数调用锚点而非裸字符串：
+  //   "commands" 这类裸词在 chunk 里出现多次，裸替换会误伤无关位置；
+  //   带上 hint(...)/rawKeyHint(...) 整个调用表达式做锚点即为唯一匹配
+  //   （实测下列锚点在该 chunk 中各出现 1 次）。第二个参数只用于显示，
+  //   第一个参数是键位 id，改成中文不影响按键行为。
+  ["hint(\"app.interrupt\",\"interrupt\")", "hint(\"app.interrupt\",\"interrupt（中断）\")"],
+  ["rawKeyHint(\"/\",\"commands\")", "rawKeyHint(\"/\",\"commands（命令）\")"],
+  ["rawKeyHint(\"!\",\"bash\")", "rawKeyHint(\"!\",\"bash（运行命令）\")"],
+  ["hint(\"app.tools.expand\",\"more\")", "hint(\"app.tools.expand\",\"more（更多）\")"],
+  ["\"clear/exit\"", "\"clear/exit（清空/退出）\""],
+  // 模板串静态片段：
+  //   `Press ${keyText("app.tools.expand")} to show full startup help${showDetails?" and loaded resources":""}.`
+  // 只替换两段纯文本，保留 ${...} 表达式原样，避免破坏模板结构。
+  ["to show full startup help", "to show full startup help（显示完整启动帮助）"],
+  [" and loaded resources", " and loaded resources（与已加载资源）"],
 ];

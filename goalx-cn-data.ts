@@ -42,7 +42,6 @@ export const GOAL_X_MAPS: Record<string, Array<[string, string]>> = {
     ['"Goal changed while confirming; nothing was cleared."', '"Goal changed while confirming; nothing was cleared.（确认期间目标已变化，未清除任何内容。）"'],
     ['"No goal is set. Use /goal to draft one, or /goal-direct <objective> to create one immediately."', '"No goal is set. Use /goal to draft one, or /goal-direct <objective> to create one immediately.（未设置目标。用 /goal 起草一个，或用 /goal-direct <目标> 立即创建。）"'],
     ['"Goal is complete. Use /goal to draft a new one, or /goal-direct <objective> to create one immediately."', '"Goal is complete. Use /goal to draft a new one, or /goal-direct <objective> to create one immediately.（目标已完成。用 /goal 起草新目标，或用 /goal-direct <目标> 立即创建。）"'],
-    ['"Provide the replacement objective: /goal-tweak <new objective>"', '"Provide the replacement objective: /goal-tweak <new objective>（请提供替换后的目标：/goal-tweak <新目标>）"'],
     ['"No active draft to cancel."', '"No active draft to cancel.（没有可取消的草稿。）"'],
     ['"Draft cancelled; no goal was created. The execution profile is restored."', '"Draft cancelled; no goal was created. The execution profile is restored.（草稿已取消，未创建目标。执行配置已恢复。）"'],
 

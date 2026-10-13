@@ -17,6 +17,7 @@
     "lib.ts",
     "patches.ts",
     "checkup.ts",
+    "locale-pack.ts",
     "pi-ui-cn-data.ts",
     "plan-cn-data.ts",
     "goalx-cn-data.ts",

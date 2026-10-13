@@ -14,9 +14,12 @@
  */
 
 import * as fs from "node:fs";
-import { collectTargets } from "./patches.ts";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { collectTargets, existingBackupFor } from "./patches.ts";
+import { isExportedMember } from "./locale-pack.ts";
 
-export type IssueKind = "compare" | "identifier" | "duplicate" | "stale";
+export type IssueKind = "template" | "compare" | "identifier" | "duplicate" | "stale" | "exported";
 
 export interface CheckupIssue {
   label: string;
@@ -31,11 +34,11 @@ export interface CheckupResult {
   files: number;
 }
 
-/** 取「未汉化原文」：优先 .bak（原始英文），没有则用当前文件 */
+/** 取「未汉化原文」：优先当前版本的版本化备份，回退旧式 .bak，都没有则用当前文件 */
 function originalText(file: string): { text: string; fromBak: boolean } | undefined {
-  const bak = file + ".bak";
+  const bak = existingBackupFor(file);
   try {
-    if (fs.existsSync(bak)) return { text: fs.readFileSync(bak, "utf8"), fromBak: true };
+    if (bak) return { text: fs.readFileSync(bak, "utf8"), fromBak: true };
     return { text: fs.readFileSync(file, "utf8"), fromBak: false };
   } catch {
     return undefined;
@@ -53,17 +56,48 @@ function findPositions(src: string, key: string): number[] {
   return out;
 }
 
-/** 该位置两侧是否紧邻比较运算符（=== / !== / == / !=） */
-function nearComparison(src: string, pos: number, len: number): boolean {
+/** 该位置两侧是否紧邻比较运算符（=== / !== / == / !=） */function nearComparison(src: string, pos: number, len: number): boolean {
   const before = src.slice(Math.max(0, pos - 16), pos);
   const after = src.slice(pos + len, pos + len + 16);
   return /[=!]==?\s*$/.test(before) || /^\s*[=!]==?/.test(after);
+}
+
+// 映射源文件里用反引号做字符串界定符是致命错误：
+// 形如 [`Sign in with ${x}`] 会在模块加载时真的求值 ${x} → ReferenceError → 整个扩展加载失败，
+// 而那时体检本身也跑不起来。所以这里在体检入口先扫源文件（运行时无法区分两种写法）。
+const DATA_FILES = ["pi-ui-cn-data.ts", "plan-cn-data.ts", "goalx-cn-data.ts", "btw-cn-data.ts"];
+function checkTemplateLiterals(issues: CheckupIssue[]): void {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const f of DATA_FILES) {
+    let text: string;
+    try { text = fs.readFileSync(path.join(here, f), "utf8"); } catch { continue; }
+    text.split("\n").forEach((ln, i) => {
+      if (/\[\s*`/.test(ln) || /,\s*`[^`]*`\s*\]/.test(ln)) {
+        issues.push({
+          label: f,
+          key: ln.trim().slice(0, 70),
+          kind: "template",
+          detail: "映射用了反引号模板串：加载时 ${...} 会被求值，整个扩展会加载失败（改用双引号包裹）",
+        });
+      }
+    });
+  }
+}
+
+// 带引号的 key：若该文本在原文里只用了一种引号（无 '...' / `...` 变体），
+// 则 split/join 会把所有出现（含比较处）一并替换，两侧始终一致，比较不会失效。
+// 实例：[\"Yes\",\"No\"] 与 ===\"Yes\" 都是双引号 → 汉化后两侧同为「Yes（是）」✓
+function allSameQuoteForm(text: string, core: string, hasQuote: boolean): boolean {
+  if (!hasQuote) return false; // 裸串没有边界，比较风险仍需提示
+  const forms = ['"', "'", "`"].filter((q) => text.includes(q + core + q)).length;
+  return forms <= 1;
 }
 
 export function runCheckup(): CheckupResult {
   const targets = collectTargets();
   const issues: CheckupIssue[] = [];
   let checked = 0;
+  checkTemplateLiterals(issues);
 
   for (const t of targets) {
     const orig = originalText(t.file);
@@ -75,21 +109,38 @@ export function runCheckup(): CheckupResult {
       const core = key.replace(/^["'`]/, "").replace(/["'`]$/, "");
       if (core.length < 3) continue;
       checked++;
+      // 带引号的 key 有天然边界，用完整形态（含引号）定位：
+      // 否则 core 会命中标识符里的同名字串，例如 "Transport" 撞上 commandTransport==="stdin"，
+      // 被误报成「参与逻辑比较」。
+      const hasQuote = /["'`]/.test(key);
+      const probe = hasQuote ? key : core;
 
-      const positions = findPositions(text, core);
+      const positions = findPositions(text, probe);
       if (positions.length === 0) {
-        // .bak 里都没有说明这条映射已经彻底失效（pi 改文案了）
+        // 原文里都没有说明这条映射已经彻底失效（pi 改文案了）
         if (fromBak) issues.push({ label: t.label, key: core, kind: "stale", detail: "原文中已找不到（pi 可能改了文案）" });
         continue;
       }
-      if (positions.some((p) => nearComparison(text, p, core.length))) {
-        issues.push({ label: t.label, key: core, kind: "compare", detail: "参与逻辑比较（跨文件/跨层时会导致判断失效）" });
+      if (positions.some((p) => nearComparison(text, p, probe.length)) && !allSameQuoteForm(text, core, hasQuote)) {
+        issues.push({ label: t.label, key: core, kind: "compare", detail: "该文案同时参与字符串比较，且原文里存在不同引号形态：只有一种形态会被替换，比较的另一侧会失效" });
+        continue;
+      }
+      // 字面量若是「导出对象的成员」，可能既是显示文案又是逻辑校验值。
+      // 实例：ROW_INTENT_META.other.label 既喂给 displayLabel() 显示，
+      // 又被 RESERVED_LABEL_SET 拿去校验（对面来自模型输入）。
+      // nearComparison 看不见这类风险 —— 数据流跨了对象属性与文件边界，字面量旁边没有比较运算符。
+      if (positions.some((p) => isExportedMember(text, p))) {
+        issues.push({
+          label: t.label,
+          key: core,
+          kind: "exported",
+          detail: "位于导出对象内（可能既是显示文案又是逻辑校验值），替换后 canonical 值会变，建议移除",
+        });
         continue;
       }
       // 裸串紧邻标识符字符 → 会直接改坏代码。
       // 实例：裸串 "Assistant" 命中函数名 isAssistantMessage，替换后成为 isAssistant（助手）Message，
       // 插件因语法错误无法加载，pi 启动直接报 ParseError。
-      const hasQuote = /["'`]/.test(key);
       if (!hasQuote) {
         const broken = positions.some(
           (p) => /[A-Za-z0-9_]/.test(text[p + core.length] ?? "") || /[A-Za-z0-9_]/.test(text[p - 1] ?? ""),
@@ -121,8 +172,10 @@ export function formatCheckup(r: CheckupResult): string {
     return `✅ 体检通过\n${files} 个文件 / ${checked} 条映射，未发现风险。`;
   }
   const groups: Array<[IssueKind, string]> = [
+    ["template", "🛑 映射用了反引号模板串（会导致扩展加载失败，必须修）"],
     ["identifier", "🛑 裸串紧邻标识符（会改坏代码，必须修）"],
     ["compare", "⚠️ 参与逻辑比较（有功能损坏风险）"],
+    ["exported", "⚠️ 位于导出对象内（可能既是显示文案又是逻辑校验值）"],
     ["duplicate", "⚠️ 重复出现（可能误伤）"],
     ["stale", "ℹ️ 已失效（pi 改过文案）"],
   ];

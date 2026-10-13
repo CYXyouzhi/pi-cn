@@ -7,7 +7,7 @@
  *   - pi-plan-mode：菜单 chunk + dist/index.ts 状态/通知
  *   - pi-tui-kit：底部导航提示（navigate/select/close/back）
  *   - pi-web-access：Gemini 提示
- * 只改纯显示文本；label/逻辑值/命令名一律不动；备份 .bak、语法校验、幂等。
+ * 只改纯显示文本；label/逻辑值/命令名一律不动；备份 .bak.<包版本>、语法校验、幂等。
  */
 
 import * as fs from "node:fs";
@@ -18,10 +18,11 @@ import { homedir } from "node:os";
 import { PLAN_MODE_UI_MAP, PLAN_MODE_STATUS_MAP, TUI_KIT_MAP } from "./plan-cn-data.ts";
 import { GOAL_X_MAPS, GOAL_X_PAIR_COUNT } from "./goalx-cn-data.ts";
 import { BTW_MAP } from "./btw-cn-data.ts";
+import { readLocaleMaps, isExportedMember } from "./locale-pack.ts";
 import { UI_CN_MAP, UI_FRAG_MAP } from "./pi-ui-cn-data.ts";
 
 // ---------- 映射 ----------
-const MAIN_MAP: Array<[string, string]> = [["Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.","Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.（等待 HTTP 头或响应体的最大空闲时间。本地模型停顿超过五分钟时可关闭。）"],["Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.","Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.（输入时按回车会排队转向消息。'one-at-a-time'：一次发送一条并等待响应。'all'：一次性全部发送。）"],["Could not refresh ${result.errors.size} model catalogs (${[...result.errors.keys()].join(\", \")}); showing cached models.","Could not refresh ${result.errors.size} model catalogs (${[...result.errors.keys()].join(\", \")}); showing cached models.（无法刷新 ${result.errors.size} 个模型目录（${[...result.errors.keys()].join(\", \")}）；显示缓存的模型。）"],["Override the default thinking level for specific models. ${cycleThinkingKey} cycles in-session.","Override the default thinking level for specific models. ${cycleThinkingKey} cycles in-session.（为特定模型覆盖默认思考级别。${cycleThinkingKey} 在会话内循环切换。）"],["Could not refresh model catalogs: ${error instanceof Error ? error.message : String(error)}","Could not refresh model catalogs: ${error instanceof Error ? error.message : String(error)}（无法刷新模型目录：${error instanceof Error ? error.message : String(error)}）"],["  No named sessions in current folder. Press ${toggleKey} to show all, or Tab to view all.","  No named sessions in current folder. Press ${toggleKey} to show all, or Tab to view all.（当前文件夹没有已命名的会话。按 ${toggleKey} 显示全部，或按 Tab 查看全部。）"],["Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}","Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}（已保存的决定：${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}）"],["Fallback behavior when no extension or saved trust decision decides project trust","Fallback behavior when no extension or saved trust decision decides project trust（当没有扩展或已保存的信任决定时，项目信任的回退行为）"],["Show transcript notices for significant prompt-cache misses and compaction costs","Show transcript notices for significant prompt-cache misses and compaction costs（在提示缓存未命中和压缩成本显著时显示记录通知）"],["Print the transcript or only a session resume hint when exiting fullscreen mode","Print the transcript or only a session resume hint when exiting fullscreen mode（退出全屏模式时输出完整记录或仅输出会话恢复提示）"],["Could not refresh ${result.errors.keys().next().value}; showing cached models.","Could not refresh ${result.errors.keys().next().value}; showing cached models.（无法刷新 ${result.errors.keys().next().value}；显示缓存的模型。）"],["Only showing models from configured providers. Use /login to add providers.","Only showing models from configured providers. Use /login to add providers.（仅显示已配置提供商的模型。使用 /login 添加提供商。）"],["Send an anonymous version/update ping after changelog-detected updates","Send an anonymous version/update ping after changelog-detected updates（检测到更新后发送匿名版本/更新回执）"],["Horizontal padding for user messages, assistant messages, and thinking","Horizontal padding for user messages, assistant messages, and thinking（用户消息、助手消息和思考的水平内边距）"],["Scrollbar behavior in fullscreen mode; has no effect in regular mode","Scrollbar behavior in fullscreen mode; has no effect in regular mode（全屏模式下的滚动条行为；普通模式下无效）"],["Current session: ${options.projectTrusted ? \"trusted\" : \"untrusted\"}","Current session: ${options.projectTrusted ? \"trusted\" : \"untrusted\"}（当前会话：${options.projectTrusted ? \"已信任\" : \"未信任\"}）"],["No matching package found for ${source}. Did you mean ${suggestion}?","No matching package found for ${source}. Did you mean ${suggestion}?（未找到匹配 ${source} 的包。您是不是想找 ${suggestion}？）"],["Resize large images to 2000x2000 max for better model compatibility","Resize large images to 2000x2000 max for better model compatibility（将大图缩放至最大 2000x2000，以获得更好的模型兼容性）"],["Show the terminal cursor while still positioning it for IME support","Show the terminal cursor while still positioning it for IME support（显示终端光标（同时为 IME 支持定位））"],["  Enter to select \\xB7 Ctrl+S to set as default \\xB7 Esc to cancel","  Enter to select \\xB7 Ctrl+S to set as default \\xB7 Esc to cancel（回车选择 · Ctrl+S 设为默认 · Esc 取消）"],["Select a theme, or choose Automatic to follow terminal appearance.","Select a theme, or choose Automatic to follow terminal appearance.（选择主题，或选择 Automatic 跟随终端外观。）"],["Preferred transport for providers that support multiple transports","Preferred transport for providers that support multiple transports（为支持多种传输方式的提供商选择首选传输）"],["Project is not trusted; refusing to access project package storage","Project is not trusted; refusing to access project package storage（项目未受信任；拒绝访问项目包存储）"],["Refusing to use path outside package install root: ${resolvedPath}","Refusing to use path outside package install root: ${resolvedPath}（拒绝使用包安装根目录之外的路径：${resolvedPath}）"],["Warn when Anthropic subscription auth may use paid extra usage","Warn when Anthropic subscription auth may use paid extra usage（当 Anthropic 订阅认证可能产生付费额外用量时警告）"],["Select authentication method for ${providerOptions[0].name}:","Select authentication method for ${providerOptions[0].name}（为 ${providerOptions[0].name} 选择认证方式：）:"],["Thinking Level for ${m ? modelDisplayLabel(m) : ctx.model}","Thinking Level for ${m ? modelDisplayLabel(m) : ctx.model}（模型 ${m ? modelDisplayLabel(m) : ctx.model} 的思考级别）"],["Use separate themes for light and dark terminal appearance","Use separate themes for light and dark terminal appearance（为浅色和深色终端分别使用主题）"],["  No named sessions found. Press ${toggleKey} to show all.","  No named sessions found. Press ${toggleKey} to show all.（未找到已命名的会话。按 ${toggleKey} 显示全部。）"],["  Type to filter \\xB7 Enter to select \\xB7 Esc to go back","  Type to filter \\xB7 Enter to select \\xB7 Esc to go back（输入过滤 · 回车选择 · Esc 返回）"],["Theme to use in automatic mode when the terminal is light","Theme to use in automatic mode when the terminal is light（自动模式下终端为浅色时使用的主题）"],["Clear empty rows when content shrinks (may cause flicker)","Clear empty rows when content shrinks (may cause flicker)（内容缩小时清除空行（可能闪烁））"],["Theme to use in automatic mode when the terminal is dark","Theme to use in automatic mode when the terminal is dark（自动模式下终端为深色时使用的主题）"],["Show OSC 9;4 progress indicators in the terminal tab bar","Show OSC 9;4 progress indicators in the terminal tab bar（在终端标签栏显示 OSC 9;4 进度指示）"],["  No sessions in current folder. Press Tab to view all.","  No sessions in current folder. Press Tab to view all.（当前文件夹没有会话。按 Tab 查看全部。）"],["Choose themes for terminal light and dark appearance.","Choose themes for terminal light and dark appearance.（为终端浅色和深色外观选择主题。）"],["Select the theme to use for light terminal appearance","Select the theme to use for light terminal appearance（选择浅色终端外观使用的主题）"],["Select the theme to use for dark terminal appearance","Select the theme to use for dark terminal appearance（选择深色终端外观使用的主题）"],["Automatically compact context when it gets too large","Automatically compact context when it gets too large（上下文过大时自动压缩）"],["Action when pressing Escape twice with empty editor","Action when pressing Escape twice with empty editor（编辑器为空时连续按两次 Esc 的行为）"],["Revert to global default (${config.thinkingLevel})","Revert to global default (${config.thinkingLevel})（恢复为全局默认（${config.thinkingLevel}））"],["Log in to a provider or configure an API key first","Log in to a provider or configure an API key first（请先登录提供商或配置 API Key）"],["New version ${release.version} is available. Run ","New version ${release.version} is available. Run （新版本 ${release.version} 可用。运行）"],["Interface layout; fullscreen mode is experimental","Interface layout; fullscreen mode is experimental（界面布局；全屏模式为实验性）"],["Max visible items in autocomplete dropdown (3-20)","Max visible items in autocomplete dropdown (3-20)（自动补全下拉框的最大可见项数（3-20））"],["Model refresh timed out; showing cached models.","Model refresh timed out; showing cached models.（模型刷新超时；显示缓存的模型。）"],["Light/dark detection requires terminal support.","Light/dark detection requires terminal support.（浅色/深色检测需要终端支持。）"],["Prevent images from being sent to LLM providers","Prevent images from being sent to LLM providers（阻止图片发送给 LLM 提供商）"],["Render Mermaid code blocks as Unicode diagrams","Render Mermaid code blocks as Unicode diagrams（将 Mermaid 代码块渲染为 Unicode 图形）"],["Preferred inline image width in terminal cells","Preferred inline image width in terminal cells（终端中内联图片的优选宽度）"],["Select default thinking level for this model","Select default thinking level for this model（为此模型选择默认思考级别）"],["trash: ${parts.join(\" \\xB7 \").slice(0, 200)}","trash: ${parts.join(\" \\xB7 \").slice(0, 200)}（回收站：${parts.join(\" · \").slice(0, 200)}）"],["Hide thinking blocks in assistant responses","Hide thinking blocks in assistant responses（在助手回复中隐藏思考块）"],["${label} (inherited from ${decision.path})","${label} (inherited from ${decision.path})（${label}（继承自 ${decision.path}））"],["Cannot delete the currently active session","Cannot delete the currently active session（无法删除当前正在使用的会话）"],["Horizontal padding for input editor (0-3)","Horizontal padding for input editor (0-3)（输入编辑器的水平内边距（0-3））"],["${LEVEL_DESCRIPTIONS[level]} \\xB7 default","${LEVEL_DESCRIPTIONS[level]} · 默认"],["Register skills as /skill:name commands","Register skills as /skill:name commands（将技能注册为 /skill:name 命令）"],["No matching package found for ${source}","No matching package found for ${source}（未找到匹配 ${source} 的包）"],["Switch to one theme for light and dark","Switch to one theme for light and dark（切换为单一主题（不分深浅色））"],["Show condensed changelog after updates","Show condensed changelog after updates（更新后显示简短的更新日志）"],["  Enter to select \\xB7 Esc to go back","  Enter to select \\xB7 Esc to go back（回车选择 · Esc 返回）"],["Enable or disable individual warnings","Enable or disable individual warnings（启用或禁用各项警告）"],["  Model Name: ${selected.model.name}","  Model Name: ${selected.model.name}（模型名称：${selected.model.name}）"],["Package updates are available. Run ","Package updates are available. Run （有可用的包更新。运行）"],["Disable verbose printing at startup","Disable verbose printing at startup（启动时关闭详细输出）"],["Failed to load sessions: ${message}","Failed to load sessions: ${message}（加载会话失败：${message}）"],["Extra-high reasoning (~32k tokens)","Extra-high reasoning (~32k tokens)（超深度推理（约 32k tokens））"],["Very brief reasoning (~1k tokens)","Very brief reasoning (~1k tokens)（非常简短的推理（约 1k tokens））"],["Default filter when opening /tree","Default filter when opening /tree（打开 /tree 时的默认过滤方式）"],["Failed to delete: ${errorMessage}","Failed to delete: ${errorMessage}（删除失败：${errorMessage}）"],["Updating ${scope} npm packages...","Updating ${scope} npm packages...（正在更新 ${scope} 的 npm 包...）"],["Missing source: ${resolvedSource}","Missing source: ${resolvedSource}（缺少源：${resolvedSource}）"],["Render images inline in terminal","Render images inline in terminal（在终端中内联渲染图片）"],["Updating ${sources[0].source}...","Updating ${sources[0].source}...（正在更新 ${sources[0].source}...）"],["Path does not exist: ${resolved}","Path does not exist: ${resolved}（路径不存在：${resolved}）"],["${modelName} \\u2022 thinking off","${modelName} \\u2022 thinking off（${modelName} • 思考关闭）"],["Moderate reasoning (~8k tokens)","Moderate reasoning (~8k tokens)（中度推理（约 8k tokens））"],["Resume Session (Current Folder)","Resume Session (Current Folder)（恢复会话（当前文件夹））"],["Refreshing model catalogs\\u2026","Refreshing model catalogs\\u2026（正在刷新模型目录…）"],["Select authentication method:","Select authentication method（选择认证方式：）:"],["Color theme for the interface","Color theme for the interface（界面的颜色主题）"],["Light reasoning (~2k tokens)","Light reasoning (~2k tokens)（轻度推理（约 2k tokens））"],["Deep reasoning (~16k tokens)","Deep reasoning (~16k tokens)（深度推理（约 16k tokens））"],["No login methods available.","No login methods available.（没有可用的登录方式。）"],["Select a model to configure","Select a model to configure（选择要配置的模型）"],["${label} (${decision.path})","${label} (${decision.path})（${label}（${decision.path}））"],["Updating ${entry.source}...","Updating ${entry.source}...（正在更新 ${entry.source}...）"],["Warning: ${warningMessage}","Warning: ${warningMessage}（警告：${warningMessage}）"],["Refreshing ${sourceStr}...","Refreshing ${sourceStr}...（正在刷新 ${sourceStr}...）"],["Package Updates Available","Package Updates Available（有可用的包更新）"],["Model catalogs refreshed.","Model catalogs refreshed.（模型目录已刷新。）"],["Per-Model Thinking Level","Per-Model Thinking Level（各模型思考级别）"],["Label (empty to remove):","Label (empty to remove)（标签（留空删除）：）:"],["Sign in with an account","Sign in with an account（使用账号登录）"],["Sign in with an API key","Sign in with an API key（使用 API Key 登录）"],["Installing ${source}...","Installing ${source}...（正在安装 ${source}...）"],["Session moved to trash","Session moved to trash（会话已移到回收站）"],["Removing ${source}...","Removing ${source}...（正在移除 ${source}...）"],["  No matching models","  No matching models（没有匹配的模型）"],["Resume Session (All)","Resume Session (All)（恢复会话（全部））"],["No models available","No models available（没有可用模型）"],["  No sessions found","  No sessions found（没有找到会话）"],["  No entries found","  No entries found（没有找到条目）"],["Maximum reasoning","Maximum reasoning（最大推理）"],["Update Available","Update Available（有可用更新）"],["Save and go back","Save and go back（保存并返回）"],["(clear override)","(clear override)（（清除覆盖））"],["Delete session? ","Delete session? （删除会话？）"],["Automatic Theme","Automatic Theme（自动主题）"],["Type to search:","Type to search（输入搜索：）:"],["Session deleted","Session deleted（会话已删除）"],["Thinking Level","Thinking Level（思考级别）"],["  Session Tree","  Session Tree（会话树）"],["Rename Session","Rename Session（重命名会话）"],["Current folder","Current folder（当前文件夹）"],["\"Changelog: \"","\"Changelog: （更新日志：）\""],[" (all/scoped)"," (all/scoped)（（全部/限定））"],["Project trust","Project trust（项目信任）"],["Unknown error","Unknown error（未知错误）"],[" \\xB7 default"," \\xB7 default（· 默认）"],["No reasoning","No reasoning（无推理）"],["no results","no results（无结果）"],["Packages:","Packages（包：）:"],["Scope: ","Scope（范围：）: "],[" (auto)"," (auto)（（自动））"],["Sort: ","Sort（排序：）: "],["Name: ","Name（名称：）: "]];
+const MAIN_MAP: Array<[string, string]> = [["Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.","Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes.（等待 HTTP 头或响应体的最大空闲时间。本地模型停顿超过五分钟时可关闭。）"],["Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.","Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once.（输入时按回车会排队转向消息。'one-at-a-time'：一次发送一条并等待响应。'all'：一次性全部发送。）"],["Could not refresh ${result.errors.size} model catalogs (${[...result.errors.keys()].join(\", \")}); showing cached models.","Could not refresh ${result.errors.size} model catalogs (${[...result.errors.keys()].join(\", \")}); showing cached models.（无法刷新 ${result.errors.size} 个模型目录（${[...result.errors.keys()].join(\", \")}）；显示缓存的模型。）"],["Override the default thinking level for specific models. ${cycleThinkingKey} cycles in-session.","Override the default thinking level for specific models. ${cycleThinkingKey} cycles in-session.（为特定模型覆盖默认思考级别。${cycleThinkingKey} 在会话内循环切换。）"],["Could not refresh model catalogs: ${error instanceof Error?error.message:String(error)}","Could not refresh model catalogs: ${error instanceof Error?error.message:String(error)}（无法刷新模型目录：${error instanceof Error ? error.message : String(error)}）"],["  No named sessions in current folder. Press ${toggleKey} to show all, or Tab to view all.","  No named sessions in current folder. Press ${toggleKey} to show all, or Tab to view all.（当前文件夹没有已命名的会话。按 ${toggleKey} 显示全部，或按 Tab 查看全部。）"],["Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath,options.savedDecision)}","Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath,options.savedDecision)}（已保存的决定：${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}）"],["Fallback behavior when no extension or saved trust decision decides project trust","Fallback behavior when no extension or saved trust decision decides project trust（当没有扩展或已保存的信任决定时，项目信任的回退行为）"],["Print the transcript or only a session resume hint when exiting fullscreen mode","Print the transcript or only a session resume hint when exiting fullscreen mode（退出全屏模式时输出完整记录或仅输出会话恢复提示）"],["Could not refresh ${result.errors.keys().next().value}; showing cached models.","Could not refresh ${result.errors.keys().next().value}; showing cached models.（无法刷新 ${result.errors.keys().next().value}；显示缓存的模型。）"],["Only showing models from configured providers. Use /login to add providers.","Only showing models from configured providers. Use /login to add providers.（仅显示已配置提供商的模型。使用 /login 添加提供商。）"],["Send an anonymous version/update ping after changelog-detected updates","Send an anonymous version/update ping after changelog-detected updates（检测到更新后发送匿名版本/更新回执）"],["Horizontal padding for user messages, assistant messages, and thinking","Horizontal padding for user messages, assistant messages, and thinking（用户消息、助手消息和思考的水平内边距）"],["Scrollbar behavior in fullscreen mode; has no effect in regular mode","Scrollbar behavior in fullscreen mode; has no effect in regular mode（全屏模式下的滚动条行为；普通模式下无效）"],["Current session: ${options.projectTrusted?\"trusted\":\"untrusted\"}","Current session: ${options.projectTrusted?\"trusted\":\"untrusted\"}（当前会话：${options.projectTrusted ? \"已信任\" : \"未信任\"}）"],["No matching package found for ${source}. Did you mean ${suggestion}?","No matching package found for ${source}. Did you mean ${suggestion}?（未找到匹配 ${source} 的包。您是不是想找 ${suggestion}？）"],["Resize large images to 2000x2000 max for better model compatibility","Resize large images to 2000x2000 max for better model compatibility（将大图缩放至最大 2000x2000，以获得更好的模型兼容性）"],["Show the terminal cursor while still positioning it for IME support","Show the terminal cursor while still positioning it for IME support（显示终端光标（同时为 IME 支持定位））"],["Select a theme, or choose automatic to follow terminal appearance.","Select a theme, or choose automatic to follow terminal appearance.（选择主题，或选择 Automatic 跟随终端外观。）"],["Preferred transport for providers that support multiple transports","Preferred transport for providers that support multiple transports（为支持多种传输方式的提供商选择首选传输）"],["Project is not trusted; refusing to access project package storage","Project is not trusted; refusing to access project package storage（项目未受信任；拒绝访问项目包存储）"],["Refusing to use path outside package install root: ${resolvedPath}","Refusing to use path outside package install root: ${resolvedPath}（拒绝使用包安装根目录之外的路径：${resolvedPath}）"],["Warn when Anthropic subscription auth may use paid extra usage","Warn when Anthropic subscription auth may use paid extra usage（当 Anthropic 订阅认证可能产生付费额外用量时警告）"],["Select authentication method for ${providerOptions[0].name}:","Select authentication method for ${providerOptions[0].name}（为 ${providerOptions[0].name} 选择认证方式：）:"],["Thinking Level for ${m?modelDisplayLabel(m):ctx.model}","Thinking Level for ${m?modelDisplayLabel(m):ctx.model}（模型 ${m ? modelDisplayLabel(m) : ctx.model} 的思考级别）"],["Use separate themes for light and dark terminal appearance","Use separate themes for light and dark terminal appearance（为浅色和深色终端分别使用主题）"],["  No named sessions found. Press ${toggleKey} to show all.","  No named sessions found. Press ${toggleKey} to show all.（未找到已命名的会话。按 ${toggleKey} 显示全部。）"],["  Type to filter \\xB7 Enter to select \\xB7 Esc to go back","  Type to filter \\xB7 Enter to select \\xB7 Esc to go back（输入过滤 · 回车选择 · Esc 返回）"],["Theme to use in automatic mode when the terminal is light","Theme to use in automatic mode when the terminal is light（自动模式下终端为浅色时使用的主题）"],["Clear empty rows when content shrinks (may cause flicker)","Clear empty rows when content shrinks (may cause flicker)（内容缩小时清除空行（可能闪烁））"],["Theme to use in automatic mode when the terminal is dark","Theme to use in automatic mode when the terminal is dark（自动模式下终端为深色时使用的主题）"],["Show OSC 9;4 progress indicators in the terminal tab bar","Show OSC 9;4 progress indicators in the terminal tab bar（在终端标签栏显示 OSC 9;4 进度指示）"],["  No sessions in current folder. Press Tab to view all.","  No sessions in current folder. Press Tab to view all.（当前文件夹没有会话。按 Tab 查看全部。）"],["Choose themes for terminal light and dark appearance.","Choose themes for terminal light and dark appearance.（为终端浅色和深色外观选择主题。）"],["Select the theme to use for light terminal appearance","Select the theme to use for light terminal appearance（选择浅色终端外观使用的主题）"],["Select the theme to use for dark terminal appearance","Select the theme to use for dark terminal appearance（选择深色终端外观使用的主题）"],["Automatically compact context when it gets too large","Automatically compact context when it gets too large（上下文过大时自动压缩）"],["Action when pressing Escape twice with empty editor","Action when pressing Escape twice with empty editor（编辑器为空时连续按两次 Esc 的行为）"],["Revert to global default (${config.thinkingLevel})","Revert to global default (${config.thinkingLevel})（恢复为全局默认（${config.thinkingLevel}））"],["Log in to a provider or configure an API key first","Log in to a provider or configure an API key first（请先登录提供商或配置 API Key）"],["New version ${release2.version} is available. Run ","New version ${release2.version} is available. Run （新版本 ${release2.version} 可用。运行）"],["Max visible items in autocomplete dropdown (3-20)","Max visible items in autocomplete dropdown (3-20)（自动补全下拉框的最大可见项数（3-20））"],["\"Model refresh timed out; showing cached models.\"","\"Model refresh timed out; showing cached models.（模型刷新超时；显示缓存的模型。）\""],["Light/dark detection requires terminal support.","Light/dark detection requires terminal support.（浅色/深色检测需要终端支持。）"],["Prevent images from being sent to LLM providers","Prevent images from being sent to LLM providers（阻止图片发送给 LLM 提供商）"],["Render Mermaid code blocks as Unicode diagrams","Render Mermaid code blocks as Unicode diagrams（将 Mermaid 代码块渲染为 Unicode 图形）"],["Preferred inline image width in terminal cells","Preferred inline image width in terminal cells（终端中内联图片的优选宽度）"],["Select default thinking level for this model","Select default thinking level for this model（为此模型选择默认思考级别）"],["trash: ${parts.join(\" \\xB7 \").slice(0,200)}","trash: ${parts.join(\" \\xB7 \").slice(0,200)}（回收站：${parts.join(\" · \").slice(0, 200)}）"],["Hide thinking blocks in assistant responses","Hide thinking blocks in assistant responses（在助手回复中隐藏思考块）"],["${label} (inherited from ${decision.path})","${label} (inherited from ${decision.path})（${label}（继承自 ${decision.path}））"],["Cannot delete the currently active session","Cannot delete the currently active session（无法删除当前正在使用的会话）"],["Horizontal padding for input editor (0-3)","Horizontal padding for input editor (0-3)（输入编辑器的水平内边距（0-3））"],["${LEVEL_DESCRIPTIONS[level]} \\xB7 default","${LEVEL_DESCRIPTIONS[level]} · 默认"],["Register skills as /skill:name commands","Register skills as /skill:name commands（将技能注册为 /skill:name 命令）"],["`No matching package found for ${source}`","`No matching package found for ${source}（未找到匹配 ${source} 的包）`"],["Switch to one theme for light and dark","Switch to one theme for light and dark（切换为单一主题（不分深浅色））"],["Show condensed changelog after updates","Show condensed changelog after updates（更新后显示简短的更新日志）"],["  Enter to select \\xB7 Esc to go back","  Enter to select \\xB7 Esc to go back（回车选择 · Esc 返回）"],["Enable or disable individual warnings","Enable or disable individual warnings（启用或禁用各项警告）"],["  Model Name: ${selected.model.name}","  Model Name: ${selected.model.name}（模型名称：${selected.model.name}）"],["Package updates are available. Run ","Package updates are available. Run （有可用的包更新。运行）"],["Disable verbose printing at startup","Disable verbose printing at startup（启动时关闭详细输出）"],["Failed to load sessions: ${message}","Failed to load sessions: ${message}（加载会话失败：${message}）"],["\"Extra-high reasoning (~32k tokens)\"","\"Extra-high reasoning (~32k tokens)（超深度推理（约 32k tokens））\""],["\"Very brief reasoning (~1k tokens)\"","\"Very brief reasoning (~1k tokens)（非常简短的推理（约 1k tokens））\""],["Default filter when opening /tree","Default filter when opening /tree（打开 /tree 时的默认过滤方式）"],["Failed to delete: ${errorMessage4}","Failed to delete: ${errorMessage4}（删除失败：${errorMessage4}）"],["Updating ${scope} npm packages...","Updating ${scope} npm packages...（正在更新 ${scope} 的 npm 包...）"],["Missing source: ${resolvedSource}","Missing source: ${resolvedSource}（缺少源：${resolvedSource}）"],["Render images inline in terminal","Render images inline in terminal（在终端中内联渲染图片）"],["Updating ${sources[0].source}...","Updating ${sources[0].source}...（正在更新 ${sources[0].source}...）"],["Path does not exist: ${resolved}","Path does not exist: ${resolved}（路径不存在：${resolved}）"],["${modelName} \\u2022 thinking off","${modelName} \\u2022 thinking off（${modelName} • 思考关闭）"],["\"Moderate reasoning (~8k tokens)\"","\"Moderate reasoning (~8k tokens)（中度推理（约 8k tokens））\""],["Resume Session (Current Folder)","Resume Session (Current Folder)（恢复会话（当前文件夹））"],["\"Refreshing model catalogs\\u2026\"","\"Refreshing model catalogs\\u2026（正在刷新模型目录…）\""],["Select authentication method:","Select authentication method（选择认证方式：）:"],["Color theme for the interface","Color theme for the interface（界面的颜色主题）"],["\"Light reasoning (~2k tokens)\"","\"Light reasoning (~2k tokens)（轻度推理（约 2k tokens））\""],["\"Deep reasoning (~16k tokens)\"","\"Deep reasoning (~16k tokens)（深度推理（约 16k tokens））\""],["No login methods available.","No login methods available.（没有可用的登录方式。）"],["Select a model to configure","Select a model to configure（选择要配置的模型）"],["${label} (${decision.path})","${label} (${decision.path})（${label}（${decision.path}））"],["Updating ${entry.source}...","Updating ${entry.source}...（正在更新 ${entry.source}...）"],["Warning: ${warningMessage}","Warning: ${warningMessage}（警告：${warningMessage}）"],["Refreshing ${sourceStr}...","Refreshing ${sourceStr}...（正在刷新 ${sourceStr}...）"],["Package Updates Available","Package Updates Available（有可用的包更新）"],["\"Model catalogs refreshed.\"","\"Model catalogs refreshed.（模型目录已刷新。）\""],["Per-Model Thinking Level","Per-Model Thinking Level（各模型思考级别）"],["Label (empty to remove):","Label (empty to remove)（标签（留空删除）：）:"],["Sign in with an account","Sign in with an account（使用账号登录）"],["Sign in with an API key","Sign in with an API key（使用 API Key 登录）"],["Installing ${source}...","Installing ${source}...（正在安装 ${source}...）"],["Session moved to trash","Session moved to trash（会话已移到回收站）"],["Removing ${source}...","Removing ${source}...（正在移除 ${source}...）"],["\"  No matching models\"","\"  No matching models（没有匹配的模型）\""],["Resume Session (All)","Resume Session (All)（恢复会话（全部））"],["\"No models available\"","\"No models available（没有可用模型）\""],["  No sessions found","  No sessions found（没有找到会话）"],["  No entries found","  No entries found（没有找到条目）"],["\"Maximum reasoning\"","\"Maximum reasoning（最大推理）\""],["Update Available","Update Available（有可用更新）"],["Save and go back","Save and go back（保存并返回）"],["(clear override)","(clear override)（（清除覆盖））"],["Delete session? ","Delete session? （删除会话？）"],["Automatic Theme","Automatic Theme（自动主题）"],["\"Type to search:\"","\"Type to search（输入搜索：）:\""],["Session deleted","Session deleted（会话已删除）"],["\"Thinking Level\"","\"Thinking Level（思考级别）\""],["  Session Tree","  Session Tree（会话树）"],["Rename Session","Rename Session（重命名会话）"],["\"Changelog: \"","\"Changelog: （更新日志：）\""],[" (all/scoped)"," (all/scoped)（（全部/限定））"],["Project trust","Project trust（项目信任）"],["\"Unknown error\"","\"Unknown error（未知错误）\""],[" \\xB7 default"," \\xB7 default（· 默认）"],["\"No reasoning\"","\"No reasoning（无推理）\""],["Packages:","Packages（包：）:"],["Scope: ","Scope（范围：）: "],[" (auto)"," (auto)（（自动））"],["Sort: ","Sort（排序：）: "],["\"Name: \"","\"Name（名称：）: \""]];
 
 const WEB_ACCESS_MAP: Record<string, Array<[string, string]>> = {
   "index.ts": [
@@ -53,7 +54,12 @@ const MAP_VERSION =
   Object.values(WEB_ACCESS_MAP).reduce((n, p) => n + p.length, 0);
 
 const MARKER_FILE = path.join(homedir(), ".pi", "agent", "pi-cn-patch.json");
-interface PatchMarker { mapVersion: number; chunkFile?: string; }
+interface PatchMarker { mapVersion: number; chunkFile?: string; piVersion?: string; }
+
+// 备份文件判定：.bak 与 .bak.<包版本> 都算备份（版本化备份见 ensureBackup）
+const BAK_RE = /\.bak($|\.)/;
+// 汉化痕迹判定：文件里出现中文即视为已汉化（译文一律是「英文原文 + （中文注释）」）
+const CJK_RE = /[\u4e00-\u9fff]/;
 
 function readMarker(): PatchMarker | undefined {
   try {
@@ -158,7 +164,7 @@ function findMainChunk(dist: string): string | undefined {
 
   // 3) 英文标记（仅未汉化时有效）
   for (const f of fs.readdirSync(chunksDir)) {
-    if (!f.endsWith(".js") || f.endsWith(".bak")) continue;
+    if (!f.endsWith(".js") || BAK_RE.test(f)) continue;
     const p = path.join(chunksDir, f);
     try {
       if (fs.readFileSync(p, "utf8").includes("No reasoning")) return p;
@@ -168,7 +174,7 @@ function findMainChunk(dist: string): string | undefined {
   // 4) 兑底：主 chunk 远大于其他 chunk（数 MB vs 数 KB），取最大者
   let biggest: { p: string; size: number } | undefined;
   for (const f of fs.readdirSync(chunksDir)) {
-    if (!f.endsWith(".js") || f.endsWith(".bak")) continue;
+    if (!f.endsWith(".js") || BAK_RE.test(f)) continue;
     const p = path.join(chunksDir, f);
     try {
       const size = fs.statSync(p).size;
@@ -194,7 +200,7 @@ function findPlanModeDir(): string | undefined {
 function findChunkByMarker(chunksDir: string, marker: string): string | undefined {
   if (!fs.existsSync(chunksDir)) return undefined;
   for (const f of fs.readdirSync(chunksDir)) {
-    if (f.endsWith(".bak") || f.endsWith(".map")) continue;
+    if (BAK_RE.test(f) || f.endsWith(".map")) continue;
     if (!f.endsWith(".js") && !f.endsWith(".ts")) continue;
     const p = path.join(chunksDir, f);
     try {
@@ -276,6 +282,122 @@ function syntaxCheck(file: string, src: string): string | undefined {
   return results[0] ?? "语法校验失败";
 }
 
+// ---------- 备份：文件名带包版本 ----------
+// 为什么带版本：备份只在「当前版本还没有备份」时创建，而 pi 原地覆盖升级后旧 .bak 会残留，
+// 新版本文件就会“看起来已备份”，还原时把旧版本代码写回新版本 → 文件损坏。
+// 带上安装版本的包版本号后，升级必然重新备份，且还原只认当前版本的备份。
+function safeRead(p: string): string {
+  try { return fs.readFileSync(p, "utf8"); } catch { return ""; }
+}
+
+// 从文件路径向上找最近的 package.json，取它的版本号（pi 主程序即 pi 的版本）
+function packageVersionOf(file: string): string | undefined {
+  let dir = path.dirname(path.resolve(file));
+  for (let up = 0; up <= 6; up++) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+      if (typeof pkg?.version === "string" && pkg.version) return pkg.version;
+    } catch { /* 这一层没有 package.json，继续向上 */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+// 当前安装版本对应的备份路径，例如 chunk-XXX.js.bak.1.0.0
+export function backupPathFor(file: string): string {
+  return file + ".bak." + (packageVersionOf(file) ?? "unknown");
+}
+
+// 体检等只读场景：优先当前版本备份，回退旧式 .bak（不用于还原，只用于比对原文）
+export function existingBackupFor(file: string): string | undefined {
+  const versioned = backupPathFor(file);
+  if (fs.existsSync(versioned)) return versioned;
+  const legacy = file + ".bak";
+  return fs.existsSync(legacy) ? legacy : undefined;
+}
+
+// 列出同一目标文件的所有备份（含旧版本残留），用于还原后统计提示
+function listBackups(file: string): string[] {
+  const dir = path.dirname(file);
+  const base = path.basename(file);
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => f === base + ".bak" || f.startsWith(base + ".bak."))
+      .map((f) => path.join(dir, f));
+  } catch {
+    return [];
+  }
+}
+
+// 旧备份是否就是当前文件的“上一版”（同源）？
+// 汉化只在原文里插入「（中文注释）」，所以同源备份的各个片段都能在当前文件里按序找到。
+// 为什么不能只看「当前文件含中文」：pi-goal-x 这类源码本身就带中文注释，那个特征失效。
+function isSameSource(current: string, legacy: string): boolean {
+  if (!legacy || legacy.length < 64) return false;
+  // 当前文件比备份还短：不可能只是“在备份上加了注释”
+  if (current.length < legacy.length * 0.98) return false;
+  const SEGMENTS = 20;
+  const step = Math.max(1, Math.floor(legacy.length / SEGMENTS));
+  let from = 0;
+  let hit = 0;
+  let tried = 0;
+  for (let i = 0; i < SEGMENTS; i++) {
+    const seg = legacy.slice(i * step, i * step + Math.min(step, 400));
+    if (!seg) break;
+    tried++;
+    const at = current.indexOf(seg, from);
+    if (at >= 0) { hit++; from = at + seg.length; }
+  }
+  return tried > 0 && hit / tried >= 0.8;
+}
+
+// 把旧式 .bak 迁移成「当前版本」的备份（.bak.<版本>）。
+// 单独抽出来的原因：某文件本次没有新条目可应用时 applyToFile 会直接返回，
+// 但它的旧备份仍需迁移，否则 /汉化 清除 会因「找不到当前版本的备份」而跳过它。
+function migrateLegacyBackup(file: string, src?: string): boolean {
+  const target = backupPathFor(file);
+  if (fs.existsSync(target)) return false;
+  const legacy = file + ".bak";
+  if (!fs.existsSync(legacy)) return false;
+  const current = src ?? safeRead(file);
+  const legacyText = safeRead(legacy);
+  // a) 强判定：当前文件已含中文、旧备份是纯英文
+  // b) 弱判定：旧备份的片段基本都能在当前文件里按序找到（整文件本来就带中文注释的源码）
+  const strong = CJK_RE.test(current) && !CJK_RE.test(legacyText);
+  if (!strong && !isSameSource(current, legacyText)) return false;
+  try { fs.renameSync(legacy, target); return true; } catch { return false; }
+}
+
+// 写盘前确保「当前安装版本」的原文备份存在。
+// src 是替换前的内容：只有它不含中文时才当作原文备份，绝不把已汉化的内容存成“原文”。
+function ensureBackup(file: string, src: string): void {
+  const target = backupPathFor(file);
+  if (fs.existsSync(target)) return; // 本版本已备份，不动
+
+  const legacy = file + ".bak";
+  if (fs.existsSync(legacy)) {
+    // 1) 内容特征判定优先：当前文件已汉化、旧备份纯英文 → 就是它的原文备份
+    if (migrateLegacyBackup(file, src)) return;
+    // 2) marker 判定：marker 记的正是当前版本，或旧 marker 的 chunkFile 就是这个文件
+    const marker = readMarker();
+    const version = packageVersionOf(file) ?? "unknown";
+    const sameVersion = marker?.piVersion === version;
+    const sameFile = !marker?.piVersion && marker?.chunkFile === path.basename(file);
+    if (sameVersion || sameFile) {
+      try { fs.renameSync(legacy, target); return; } catch { /* 迁移失败则退回新建备份 */ }
+    }
+    // 3) 都不是：legacy 属于别的版本 → 改名归档（不删用户数据）
+    const archived = file + ".bak." + (marker?.piVersion ?? "legacy");
+    if (!fs.existsSync(archived)) {
+      try { fs.renameSync(legacy, archived); } catch { /* 归档失败就原样留着 */ }
+    }
+  }
+  // 未汉化的原文才值得备份（磁盘上的 p 此刻还是替换前的内容）
+  if (!CJK_RE.test(src)) fs.copyFileSync(file, target);
+}
+
 function applyToFile(p: string, pairs: Array<[string, string]>): { hits: number; error?: string } {
   let src = fs.readFileSync(p, "utf8");
   let hits = 0;
@@ -309,7 +431,7 @@ function applyToFile(p: string, pairs: Array<[string, string]>): { hits: number;
     return { hits: 0, error: path.basename(p) + " 语法校验失败，已放弃：" + err };
   }
 
-  if (!fs.existsSync(p + ".bak")) fs.copyFileSync(p, p + ".bak");
+  ensureBackup(p, before);
   fs.writeFileSync(p, src, "utf8");
   return { hits };
 }
@@ -347,7 +469,7 @@ export function applyPatches(dist: string): PatchResult {
   const r = applyToFile(chunk, [...MAIN_MAP, ...UI_CN_MAP, ...UI_FRAG_MAP]);
   if (r.error) result.errors.push(r.error);
   if (r.hits > 0) { result.appliedFiles = 1; result.appliedCount = r.hits; }
-  writeMarker({ mapVersion: MAP_VERSION, chunkFile: path.basename(chunk) });
+  writeMarker({ mapVersion: MAP_VERSION, chunkFile: path.basename(chunk), piVersion: packageVersionOf(chunk) });
   return result;
 }
 
@@ -417,9 +539,10 @@ export function applyAllPatches(): {
   tuiKit: PatchResult;
   btw: PatchResult;
   auto: PatchResult;
+  locale: PatchResult;
 } {
   const dist = findPiDist();
-  return {
+  const result = {
     pi: dist ? applyPatches(dist) : emptyResult(),
     webAccess: applyWebAccessPatches(),
     planMode: applyPlanModePatches(),
@@ -427,7 +550,12 @@ export function applyAllPatches(): {
     goalX: applyGoalXPatches(),
     btw: applyBtwPatches(),
     auto: applyAutoPatches(),
+    locale: applyLocalePatches(),
   };
+  // 本次没有新条目可应用的目标（applyToFile 在 hits=0 时不碰文件），
+  // 其旧式 .bak 仍要迁移成当前版本的备份，否则 /汉化 清除 会因找不到匹配备份而跳过。
+  for (const t of collectTargets()) migrateLegacyBackup(t.file);
+  return result;
 }
 
 // ---------- 状态 ----------
@@ -439,7 +567,7 @@ export function allPatchStatus(): Array<{ target: string; file: string; hanhua: 
       target,
       file: path.basename(p),
       hanhua: fs.readFileSync(p, "utf8").includes(marker),
-      backup: fs.existsSync(p + ".bak"),
+      backup: fs.existsSync(backupPathFor(p)),
     });
   };
   const dist = findPiDist();
@@ -461,7 +589,7 @@ export function allPatchStatus(): Array<{ target: string; file: string; hanhua: 
       if (!fs.existsSync(p)) continue;
       // 该文件内任意一条映射已命中（含中文注释）即视为已汉化
       const hanhua = GOAL_X_MAPS[file].some(([, nw]) => fs.readFileSync(p, "utf8").includes(nw));
-      list.push({ target: "pi-goal-x " + file, file, hanhua, backup: fs.existsSync(p + ".bak") });
+      list.push({ target: "pi-goal-x " + file, file, hanhua, backup: fs.existsSync(backupPathFor(p)) });
     }
   }
   return list;
@@ -579,6 +707,10 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
       // 给模型的工具/参数说明不得汉化（加了中文会改变工具调用语义）
       if (looksLikeToolSchemaText(src, m.index)) continue;
+      // 导出对象的成员可能既是显示文案又是逻辑校验值，不得汉化。
+      // 实例：ROW_INTENT_META.other.label 既喂给 displayLabel() 显示，
+      // 又被 RESERVED_LABEL_SET 拿去校验 —— 数据流跨对象与文件，纯文本体检看不见。
+      if (isExportedMember(src, m.index + m[0].indexOf(m[1]))) continue;
       if (CLI_ARG_STYLE.test(display)) continue;
       if (CODE_FRAGMENT.test(display)) continue; // 正则跨引号匹配出的代码残片
       if (display.length > MAX_DISPLAY_LENGTH) continue;
@@ -616,7 +748,7 @@ function isSourceFile(name: string): boolean {
   // 汉化它既无用（运行时读的是 .js），又会让候选清单堆满一堆永远无法应用的条目。
   if (name.endsWith(".d.ts") || name.endsWith(".d.mts") || name.endsWith(".d.cts")) return false;
   if (!name.endsWith(".js") && !name.endsWith(".ts")) return false;
-  if (name.endsWith(".bak") || name.endsWith(".map")) return false;
+  if (BAK_RE.test(name) || name.endsWith(".map")) return false;
   if (name.includes(".bundle.") || name.includes(".min.")) return false;
   return true;
 }
@@ -768,6 +900,8 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
   const staticOlds = new Set(ALL_HANHUA_PAIRS.map(([old]) => old));
   const autoMap = readAutoMap();
   const autoOlds = new Set(Object.values(autoMap).flat().map(([old]) => old));
+  // 语言包已覆盖的英文不进模型翻译队列：作者已经给了官方中文，重复翻译既费 token 又可能译法不一致。
+  const localeOlds = new Set(Object.values(readLocaleMaps()).flat().map(([old]) => old));
   const results: Array<{ file: string; items: Array<{ old: string; display: string }> }> = [];
   // pi 本体路径只算一次：findPiDist 会遍历 argv 与若干候选目录，放进循环里会明显变慢。
   const dist = findPiDist();
@@ -776,7 +910,7 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
     let src;
     try { src = fs.readFileSync(file, "utf8"); } catch { continue; }
     const piCore = !!distKey && path.resolve(file).toLowerCase().startsWith(distKey);
-    const items = extractAutoCandidates(src, piCore).filter((c) => !staticOlds.has(c.old) && !autoOlds.has(c.old));
+    const items = extractAutoCandidates(src, piCore).filter((c) => !staticOlds.has(c.old) && !autoOlds.has(c.old) && !localeOlds.has(c.old));
     if (items.length > 0) results.push({ file, items });
   }
   return results;
@@ -797,6 +931,22 @@ export function applyAutoPatches(): PatchResult {
 
 export function applyAutoPairs(file: string, pairs: Array<[string, string]>): { hits: number; error?: string } {
   return applyToFile(file, pairs);
+}
+
+// 语言包映射（插件作者官方的中文，零 token）。
+// 与自动汉化分开存放（pi-cn-locale.json）：来源不同，追溯和清除都要能分开。
+// 两者用同一套 applyToFile（备份 / 语法校验 / 幂等 / 长 key 优先），所以安全性一致。
+export function applyLocalePatches(): PatchResult {
+  const locale = readLocaleMaps();
+  const result = emptyResult();
+  result.skipped = false;
+  for (const [file, pairs] of Object.entries(locale)) {
+    if (!fs.existsSync(file)) continue;
+    const r = applyToFile(file, pairs);
+    if (r.error) result.errors.push(r.error);
+    if (r.hits > 0) { result.appliedFiles++; result.appliedCount += r.hits; }
+  }
+  return result;
 }
 
 export function saveAutoPairs(file: string, pairs: Array<[string, string]>): void {
@@ -862,18 +1012,23 @@ export function collectTargets(): PatchTarget[] {
   for (const [f, pairs] of Object.entries(readAutoMap())) {
     push("自动汉化", f, pairs as Array<[string, string]>);
   }
+  // 语言包映射（插件官方中文）
+  for (const [f, pairs] of Object.entries(readLocaleMaps())) {
+    push("语言包", f, pairs as Array<[string, string]>);
+  }
   return [...byFile.values()];
 }
 
-// ---------- 还原：从 .bak 恢复原始英文 ----------
-// 逐个目标回写 .bak 并删除备份，最后清掉标记文件，
-// 这样下次启动 pi-cn 会当作「未汉化」而重新应用。
-export function revertAllPatches(): { restored: number; files: string[]; skipped: number } {
+// ---------- 还原：从版本化备份恢复原始英文 ----------
+// 只认「当前安装版本」的备份：跨版本升级后旧备份与新文件不匹配，宁可不还原也不把旧代码写回新文件。
+// 同时统计其它版本残留的备份数量（保留不删，交给用户自行处理）。
+export function revertAllPatches(): { restored: number; files: string[]; skipped: number; stale: number } {
   let restored = 0;
   let skipped = 0;
+  let stale = 0;
   const files: string[] = [];
   for (const { file } of collectTargets()) {
-    const bak = file + ".bak";
+    const bak = backupPathFor(file);
     if (!fs.existsSync(bak)) { skipped++; continue; }
     try {
       fs.copyFileSync(bak, file);
@@ -881,7 +1036,9 @@ export function revertAllPatches(): { restored: number; files: string[]; skipped
       restored++;
       files.push(path.basename(file));
     } catch { skipped++; }
+    // 本版本备份已删除，剩下的都是其它版本的残留
+    stale += listBackups(file).length;
   }
   try { fs.unlinkSync(MARKER_FILE); } catch { /* 无标记 */ }
-  return { restored, files, skipped };
+  return { restored, files, skipped, stale };
 }

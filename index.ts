@@ -3,7 +3,7 @@
  *
  * 三合一：
  *  1. / 命令补全中文说明 + 使用频率排序（纯插件，零侵入）
- *  2. 界面文本自动汉化补丁（加载时检测并应用，备份 .bak、语法校验、幂等）
+ *  2. 界面文本自动汉化补丁（加载时检测并应用，版本化备份 .bak.<版本>、语法校验、幂等）
  *  3. 管理命令：/汉化（交互菜单：自动汉化/扫描/补充命令/界面管理）
  *
  * 原则：只改用户可见界面文字与补全提示；AI 可见内容与逻辑标识一律不动。
@@ -32,9 +32,11 @@ import {
   collectAutoCandidates,
   applyAutoPairs,
   saveAutoPairs,
+  applyLocalePatches,
   revertAllPatches,
   type PatchResult,
 } from "./patches.ts";
+import { collectLocaleCandidates, writeLocaleMaps } from "./locale-pack.ts";
 import { runCheckup, formatCheckup } from "./checkup.ts";
 
 let piRef: ExtensionAPI | undefined;
@@ -231,10 +233,28 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
     }
   } catch { /* 体检失败不影响汉化 */ }
 
+  // 先走语言包轨道：插件作者已提供官方中文（locales/zh.json）的直接采用，零 token，
+  // 且作者翻译的准确度高于模型；未被语言包覆盖的才交给下面的模型翻译。
+  let localeApplied = 0;
+  try {
+    const scan = collectLocaleCandidates();
+    if (Object.keys(scan.maps).length > 0) {
+      writeLocaleMaps(scan.maps);
+      const lr = applyLocalePatches();
+      localeApplied = lr.appliedCount;
+      for (const e of lr.errors) ctx.ui.notify(`⚠️ 语言包补丁失败：${e}`, "warning");
+    }
+  } catch { /* 语言包轨道失败不阻断后续模型翻译 */ }
+
   const results = collectAutoCandidates();
   const allItems = results.flatMap((r) => r.items);
   if (allItems.length === 0) {
-    ctx.ui.notify("✅ 未发现需要自动汉化的界面文本。", "info");
+    ctx.ui.notify(
+      localeApplied > 0
+        ? `✅ 已用插件官方中文语言包汉化 ${localeApplied} 条，无其他待翻译文本。完全重启 Pi 后生效。`
+        : "✅ 未发现需要自动汉化的界面文本。",
+      "info",
+    );
     return;
   }
   ctx.ui.notify(`发现 ${allItems.length} 条界面文本，正在用当前模型翻译…`, "info");
@@ -266,10 +286,13 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
   }
   if (errors.length > 0) {
     ctx.ui.notify(`⚠️ 部分失败：${errors.join("；")}`, "warning");
-  } else if (applied === 0) {
+  } else if (applied === 0 && localeApplied === 0) {
     ctx.ui.notify("翻译完成但未应用（可能均已汉化）。", "info");
   } else {
-    ctx.ui.notify(`✅ 已自动汉化 ${applied} 条界面文本。完全重启 Pi 后生效。`, "info");
+    const parts: string[] = [];
+    if (localeApplied > 0) parts.push(`官方语言包 ${localeApplied} 条`);
+    if (applied > 0) parts.push(`模型翻译 ${applied} 条`);
+    ctx.ui.notify(`✅ 已自动汉化：${parts.join(" + ")}。完全重启 Pi 后生效。`, "info");
   }
 
   // 顺带：自动翻译新插件的命令说明（未收录的命令 → 写入用户表，立即生效）
@@ -324,18 +347,23 @@ async function flowCheckup(ctx: any): Promise<void> {
 async function flowRevert(ctx: any): Promise<void> {
   const ok = await ctx.ui.confirm(
     "确认还原？",
-    "将把所有已汉化的文件从 .bak 恢复成英文原版，并删除备份。\n下次启动 Pi 时 pi-cn 会重新应用汉化。",
+    "将把所有已汉化的文件从版本化备份（.bak.<安装版本>）恢复成英文原版，并删除该备份。\n下次启动 Pi 时 pi-cn 会重新应用汉化。",
   );
   if (!ok) return;
   const r = revertAllPatches();
   if (r.restored === 0) {
-    ctx.ui.notify("没有可还原的文件（可能尚未汉化，或备份已丢失）。", "info");
+    ctx.ui.notify(
+      "没有可还原的文件（可能尚未汉化，或当前安装版本的备份已丢失）。" +
+        (r.skipped > 0 ? `\n已跳过 ${r.skipped} 个目标。` : ""),
+      "info",
+    );
     return;
   }
   ctx.ui.notify(
     `✅ 已还原 ${r.restored} 个文件：\n${r.files.slice(0, 12).join("\n")}` +
       (r.files.length > 12 ? `\n… 另有 ${r.files.length - 12} 个` : "") +
-      (r.skipped > 0 ? `\n\n跳过 ${r.skipped} 个（无备份）` : "") +
+      (r.skipped > 0 ? `\n\n跳过 ${r.skipped} 个（无当前版本的备份）` : "") +
+      (r.stale > 0 ? `\n\n另有 ${r.stale} 个旧版本备份残留，可手动删除（*.bak.<旧版本号>）。` : "") +
       "\n\n重启 Pi 前界面仍显示中文（内存中的代码已加载）。",
     "info",
   );
