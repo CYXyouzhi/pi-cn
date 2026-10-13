@@ -619,6 +619,8 @@ type AutoContextPattern = {
    * （label:"autoSelectSingleGoal"）与枚举值（label:"OpenAI"），汉化会破坏读写。
    */
   single?: "capital" | "any";
+  /** 插件侧也适用本条，并且允许单词候选（见 CLASS_FIELD_PATTERNS） */
+  inPlugin?: boolean;
 };
 
 const AUTO_CONTEXT_PATTERNS: AutoContextPattern[] = [
@@ -717,6 +719,26 @@ const TOOL_SCHEMA_WINDOW_FORWARD = 400;
 const CLI_ARG_STYLE =
   /(^|[\s(])(-[a-zA-Z],\s*)?--[a-zA-Z][\w-]*|<[a-z][\w-]*>|\(default[^)]{0,40}\)|overrides?\s+[A-Z][A-Z0-9_]{2,}|_[A-Z]{2,}\b|\$[A-Z][A-Z0-9_]{2,}/;
 
+/**
+ * 类字段形态的界面文案：`readonly label = "Thresholds";`
+ *
+ * 为什么单独一组：
+ *   1. 形态不同 —— 类字段用 `=` 而不是 `label:`，主白名单匹配不到，
+ *      于是 pi-token-speed 设置页里的 Thresholds / Colors / Display colors 一直是英文；
+ *   2. 允许单词候选 —— 插件的单词 label 平时一律不收（怕撞上设置键名
+ *      label:"autoSelectSingleGoal" 与枚举值 label:"OpenAI"），
+ *      但 `readonly label = "..."` 是「设置项 / UI 组件的显示名定义」，
+ *      与枚举值（在对象字面量或数组里）形态可区分，所以这一组放行；
+ *   3. 必须带 `readonly` —— 实测裸赋值里混着非界面用途的字串
+ *      （`label=" b "` 宽度填充、`label="Google Account:[^"` 正则片段），
+ *      只有加上 readonly 才能干净分开。
+ */
+const CLASS_FIELD_PATTERNS: AutoContextPattern[] = [
+  { re: /readonly\s+label\s*=\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, single: "capital", inPlugin: true },
+  { re: /readonly\s+title\s*=\s*("(?:\\.|[^"\\])*")/g, single: "capital", inPlugin: true },
+  { re: /readonly\s+description\s*=\s*("(?:\\.|[^"\\])*")/g, inPlugin: true },
+];
+
 function looksLikeToolSchemaText(src: string, index: number): boolean {
   const from = Math.max(0, index - TOOL_SCHEMA_WINDOW_BACK);
   return TOOL_SCHEMA_MARKERS.test(src.slice(from, index + TOOL_SCHEMA_WINDOW_FORWARD));
@@ -798,8 +820,14 @@ function extractLabelObjectCandidates(src: string): Array<{ old: string; display
 function extractAutoCandidates(src: string, piCore = false): Array<{ old: string; display: string }> {
   const out: Array<{ old: string; display: string }> = [];
   const seen = new Set<string>();
-  const patterns = piCore ? [...AUTO_CONTEXT_PATTERNS, ...AUTO_CONTEXT_PATTERNS_PI_ONLY] : AUTO_CONTEXT_PATTERNS;
-  for (const { re, single } of patterns) {
+  const patterns = piCore
+    ? [...AUTO_CONTEXT_PATTERNS, ...AUTO_CONTEXT_PATTERNS_PI_ONLY, ...CLASS_FIELD_PATTERNS]
+    : [...AUTO_CONTEXT_PATTERNS, ...CLASS_FIELD_PATTERNS];
+  for (const p of patterns) {
+    const re = p.re;
+    const single = p.single;
+    // 单词候选的放行范围：pi 本体一律放行；插件侧只有显式标了 inPlugin 的那组（类字段形态）放行。
+    const singleScope = piCore || p.inPlugin;
     let m;
     while ((m = re.exec(src))) {
       const quoted = m[1];
@@ -816,9 +844,9 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       if (display.length > MAX_DISPLAY_LENGTH) continue;
       if (!/[A-Za-z]/.test(display)) continue;
       if (!/\s/.test(display)) {
-        // 单词候选：只在 pi 本体、且形态符合时才收。
+        // 单词候选：只在放行范围内、且形态符合时才收。
         // 默认要求含空格，是为了避开逻辑值/枚举值（values:["default","none"]）。
-        const mode = piCore ? single : undefined;
+        const mode = singleScope ? single : undefined;
         if (!mode) continue;
         if (mode === "capital" && !/^[A-Z]/.test(display)) continue;
       }
