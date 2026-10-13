@@ -30,6 +30,7 @@ import {
   applyAllPatches,
   allPatchStatus,
   collectAutoCandidates,
+  collectScanCandidates,
   applyAutoPairs,
   saveAutoPairs,
   readAutoMap,
@@ -63,26 +64,35 @@ function collectResults(all: ReturnType<typeof applyAllPatches>) {
   };
 }
 
-// ---------- /汉化 扫描：列出界面未汉化文本 ----------
-// 完整清单写文件、通知只给摘要：pi 本体并入扫描后条目动辏数百条，
-// 塞进单条 notify 在 TUI 里必然显示不全——那正是以前「检测老是不完全」的观感来源之一。
+// ---------- /汉化 扫描：列出「可能是界面文案但未汉化」的英文 ----------
+//
+// 与 /汉化 自动 的分工：
+//   自动 是「准出器」—— 只收确认安全的形态，宁漏勿错，用于实际替换；
+//   这里 是「列举器」—— 故意放宽，把可能是文案的都列出来给人看。
+// 列举不改文件，误报无害。这正是「列举宽松、替换严格」的分离：
+//   自动 负责不误译，扫描 负责不漏看。
+//
+// 完整清单写文件、通知只给摘要：条目动辄数百条，塞进单条 notify 必然显示不全。
 async function flowScanInterface(ctx: any): Promise<void> {
-  const miss = collectAutoCandidates();
-  if (miss.length === 0) {
-    ctx.ui.notify("✅ 未发现漏网的英文界面文本（已排除 AI 内容）。", "info");
+  const { byFile, total, levelA } = collectScanCandidates();
+  if (total === 0) {
+    ctx.ui.notify("✅ 未发现未覆盖的英文界面文本。", "info");
     return;
   }
-  const total = miss.reduce((n, r) => n + r.items.length, 0);
-  const ranked = miss.slice().sort((a, b) => b.items.length - a.items.length);
+  const files = Object.keys(byFile);
+  const ranked = files.slice().sort((a, b) => byFile[b].length - byFile[a].length);
 
   const dump: string[] = [
     `# pi-cn 扫描结果  ${new Date().toISOString()}`,
-    `# 共 ${total} 条，来自 ${miss.length} 个文件`,
+    `# 宽松列举：可能是界面文案、但尚未进入映射表的英文`,
+    `# A = 含空格（最可能是给人看的文案）`,
+    `# B = 无空格（可能是键名 / 枚举值 / 逻辑标识，需人工判断）`,
+    `# 共 ${total} 条（A 级 ${levelA} 条），分布在 ${files.length} 个文件`,
     "",
   ];
-  for (const r of ranked) {
-    dump.push(`▸ ${r.file}（${r.items.length} 条）`);
-    for (const i of r.items) dump.push(`  · ${i.display}`);
+  for (const f of ranked) {
+    dump.push(`▸ ${f}（${byFile[f].length} 条）`);
+    for (const it of byFile[f]) dump.push(`  [${it.level}] ${JSON.stringify(it.text)}`);
     dump.push("");
   }
   const outFile = path.join(homedir(), ".pi", "agent", "pi-cn-scan.txt");
@@ -92,14 +102,20 @@ async function flowScanInterface(ctx: any): Promise<void> {
     saved = true;
   } catch { /* 写盘失败时仍给摘要 */ }
 
+  const aRanked = ranked.filter((f) => byFile[f].some((i) => i.level === "A"));
   const head = [
-    `扫描完成：${total} 条待汉化，分布在 ${miss.length} 个文件。`,
+    `扫描完成：${total} 条未覆盖文本（A 级 ${levelA} 条），分布在 ${files.length} 个文件。`,
     saved ? `完整清单：${outFile}` : "（清单写盘失败，只有下列摘要）",
     "",
-    "条数最多的文件：",
-    ...ranked
+    "A 级（最可能是给人看的）条目最多的文件：",
+    ...aRanked
       .slice(0, 6)
-      .map((r) => `  ${String(r.items.length).padStart(4)}  ${r.file.split(/[\\/]/).slice(-2).join("/")}`),
+      .map((f) => {
+        const a = byFile[f].filter((i) => i.level === "A").length;
+        return `  ${String(a).padStart(4)}  ${f.split(/[\\/]/).slice(-2).join("/")}`;
+      }),
+    "",
+    "提示：优先看 A 级；B 级多为键名与枚举值，多数不必动。",
   ];
   ctx.ui.notify(head.join("\n"), "info");
 }
@@ -399,6 +415,8 @@ async function flowClearFrequency(ctx: any): Promise<void> {
 async function flowHanhuaMenu(ctx: any): Promise<void> {
   const options = [
     "自动汉化：体检 + 扫描 + 翻译 + 应用",
+    "扫描：列出未覆盖的英文界面文本（只读，不翻译）",
+    "体检：检查映射有没有误伤代码",
     "清除：还原所有汉化（恢复英文原版）",
     "清空频率：重置命令使用频率",
   ];
@@ -406,8 +424,10 @@ async function flowHanhuaMenu(ctx: any): Promise<void> {
   if (!picked) return;
   const idx = options.indexOf(picked);
   if (idx === 0) return flowAutoTranslate(ctx);
-  if (idx === 1) return flowRevert(ctx);
-  if (idx === 2) return flowClearFrequency(ctx);
+  if (idx === 1) return flowScanInterface(ctx);
+  if (idx === 2) return flowCheckup(ctx);
+  if (idx === 3) return flowRevert(ctx);
+  if (idx === 4) return flowClearFrequency(ctx);
 }
 
 // ---------- /汉化界面 命令 ----------
@@ -491,7 +511,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("汉化", {
     description: "汉化管理：/汉化 [自动|清除|频率|体检]",
     getArgumentCompletions: (prefix: string) => {
-      const subs = ["自动", "清除", "频率", "体检"];
+      const subs = ["自动", "清除", "频率", "体检", "扫描"];
       const items = subs.map((value) => ({ value, label: value }));
       const filtered = items.filter((i) => i.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
@@ -503,6 +523,7 @@ export default async function (pi: ExtensionAPI) {
       if (sub === "清除") return flowRevert(ctx);
       if (sub === "频率") return flowClearFrequency(ctx);
       if (sub === "体检") return flowCheckup(ctx);
+      if (sub === "扫描") return flowScanInterface(ctx);
       return flowHanhuaMenu(ctx);
     },
   });

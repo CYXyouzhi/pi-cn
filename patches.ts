@@ -1257,6 +1257,107 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
   return results;
 }
 
+// ---------- 宽松列举器（只服务 /汉化 扫描 的诊断输出，不参与任何替换） ----------
+//
+// 与 extractAutoCandidates 的分工：
+//   那个是「准出器」—— 只收确认安全的形态，宁漏勿错，用于实际替换；
+//   这个是「列举器」—— 故意放宽，把可能是界面文案的都列出来给人看。
+// 列举不改任何文件，误报无害。这正是「列举宽松、替换严格」的分离：
+//   /汉化 自动 负责不误译，/汉化 扫描 负责不漏看。
+
+/** 明显的非文案：JS 指令、类型名、关键字 */
+const SCAN_NOISE =
+  /^(?:use strict|use asm|object|string|number|boolean|bigint|symbol|function|undefined|null|true|false|module|exports|default|constructor|prototype|toString|valueOf)$/i;
+
+/** 这个字符串值不值得列进扫描清单 */
+function isScanWorthy(text: string): boolean {
+  if (!text || text.length < 3 || text.length > 200) return false;
+  if (/[\u4e00-\u9fff]/.test(text)) return false; // 已含中文
+  if (!/[A-Za-z]{2,}/.test(text)) return false; // 没有足够字母
+  if (text.includes("${")) return false; // 模板片段
+  if (SCAN_NOISE.test(text)) return false;
+  // 跨字符串误匹配的典型特征。
+  // 为什么要防：打包代码里大量模板串（`…"…"…`）含双引号，而这里只认 "…" 边界，
+  // 会从模板串内部的引号一路上匹配到别处，拉进一大截代码。
+  // 换行与代码标点是最可靠的排除信号；括号（(default) 这类）必须保留。
+  if (/[\n\r;{}<>|&\[\]]/.test(text)) return false;
+  // 代码 / 路径 / URL / 颜色 / 正则 / 文件名
+  if (/=>|\.\.\/|\.\.\\|\bfunction\b|\breturn\b|\bconst\b|\blet\b/.test(text)) return false;
+  if (/[a-zA-Z]:[\\/]|:\/\/|^[\\/]/.test(text)) return false;
+  if (/^[a-z]+\/[a-z][\w.+-]*$/i.test(text)) return false; // MIME 类型
+  if (/^#[0-9a-f]{3,8}$/i.test(text)) return false;
+  if (/\\[dwsbnrt]|\[\^?[a-z]-[a-z]\]|\{[0-9,]+\}/.test(text)) return false;
+  if (/^[\w.-]+\.[a-z]{2,5}$/i.test(text)) return false;
+  if (/^[a-z][\w$]*(\.[a-z][\w$]*)+$/i.test(text)) return false;
+  // 标识符类噪音：kebab-case（DOM id、HTTP header、错误码）、x- 头、全大写常量
+  if (/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(text)) return false;
+  if (/^x-[a-z-]+$/.test(text)) return false;
+  if (/^[A-Z][A-Z0-9_]{3,}$/.test(text)) return false;
+  // 包名 / 模块路径：@scope/name、a/b/c
+  if (/^@?[a-z0-9][\w.-]*\/[\w.-]+$/.test(text)) return false;
+  if (/^urn:/i.test(text)) return false;
+  if (/^@[a-z0-9-]+[/\w.-]*$/i.test(text)) return false; // npm 包名
+  if (/^(?:x-|content-|accept-|upgrade-|sec-|access-control-)[a-z-]+$/i.test(text)) return false; // HTTP 头
+  // SQL 与函数调用残留（跨字符串误匹配的次生噪音）
+  if (/\b(?:SELECT|INSERT|UPDATE|DELETE|CASE\s+WHEN|CREATE\s+TABLE|UNION|JOIN)\b/i.test(text)) return false;
+  if (/^[\s?:.,=|&)]/.test(text)) return false;
+  if (/^\s*\w+\s*[=(]/.test(text)) return false;
+  return true;
+}
+
+export interface ScanCandidate {
+  text: string;
+  /** A = 含空格（最可能是给人看的文案）；B = 无空格（可能是键名 / 枚举值 / 逻辑标识） */
+  level: "A" | "B";
+}
+
+/**
+ * 宽松列举：扫已装插件，找出「可能是界面文案、但尚未进入映射表」的英文字符串。
+ * 零模型调用、零文件改动。
+ */
+export function collectScanCandidates(): {
+  byFile: Record<string, ScanCandidate[]>;
+  total: number;
+  levelA: number;
+} {
+  // 已覆盖的英文（带引号形式，与映射表的 key 同形）
+  const covered = new Set<string>();
+  for (const [old] of ALL_HANHUA_PAIRS) covered.add(old);
+  for (const pairs of Object.values(readAutoMap())) for (const [old] of pairs) covered.add(old);
+  for (const pairs of Object.values(readLocaleMaps())) for (const [old] of pairs) covered.add(old);
+
+  const byFile: Record<string, ScanCandidate[]> = {};
+  let total = 0;
+  let levelA = 0;
+
+  for (const file of enumeratePluginFiles()) {
+    let src: string;
+    try { src = fs.readFileSync(file, "utf8"); } catch { continue; }
+    const seen = new Set<string>();
+    const items: ScanCandidate[] = [];
+    const re = /("(?:\\.|[^"\\])*")/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      const quoted = m[1];
+      if (covered.has(quoted)) continue; // 已汉化
+      const text = decodeEscapes(quoted.slice(1, -1));
+      if (!isScanWorthy(text)) continue;
+      if (seen.has(text)) continue;
+      seen.add(text);
+      const level: "A" | "B" = /\s/.test(text) ? "A" : "B";
+      if (level === "A") levelA++;
+      items.push({ text, level });
+    }
+    if (items.length > 0) {
+      // A 级排前面，同级按文本长度降序（长句信息量更大）
+      items.sort((a, b) => (a.level === b.level ? b.text.length - a.text.length : a.level === "A" ? -1 : 1));
+      byFile[file] = items;
+      total += items.length;
+    }
+  }
+  return { byFile, total, levelA };
+}
+
 export function applyAutoPatches(): PatchResult {
   const auto = readAutoMap();
   const result = emptyResult();
