@@ -733,6 +733,62 @@ function countIn(src: string, quoted: string): number {
   return n;
 }
 
+/**
+ * 提取「标签对象」里的显示文案（方案 B2）。
+ *
+ * 插件把下拉框 / 枚举的显示名集中放在 Record 里：
+ *     const DISPLAY_LABELS: Record<DisplayMode, string> = {
+ *       tps: "TPS speed",
+ *       full: "Full details",
+ *     };
+ * 这些值不是 label: / description:，主白名单扫不到，设置界面右侧那一列就一直是英文。
+ *
+ * 为什么敢收：key 才是逻辑值（"tps" / "full"），value 只用于显示。
+ * 三道保护：
+ *   ① 变量名必须以 _LABELS / _LABEL 结尾 —— 明确的「显示标签」命名约定
+ *   ② value 必须与 key 文本不同（排除 {off:"off"} 这类 key/value 同形的逻辑值）
+ *   ③ value 得「像文案」：含空格或首字母大写，且不是纯数字/单位（"50 ms"、"0 | 15"）
+ */
+function extractLabelObjectCandidates(src: string): Array<{ old: string; display: string }> {
+  const out: Array<{ old: string; display: string }> = [];
+  const declRe = /(?:const|let|var)\s+([A-Za-z_$][\w$]*_LABELS?)\s*(?::[^=;\n]*)?=\s*\{/g;
+  let d: RegExpExecArray | null;
+  while ((d = declRe.exec(src)) !== null) {
+    const open = d.index + d[0].length - 1;
+    // 从开括号配平找对象结束位置（带字符串感知，避免字符串里的括号干扰）
+    let depth = 0;
+    let end = -1;
+    let inStr: string | undefined;
+    for (let i = open; i < src.length; i++) {
+      const ch = src[i];
+      if (inStr) {
+        if (ch === "\\") { i++; continue; }
+        if (ch === inStr) inStr = undefined;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
+      if (ch === "{") depth++;
+      else if (ch === "}") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end < 0) continue;
+    const body = src.slice(open + 1, end);
+    const pairRe = /(?:^|[{,])\s*(?:(\d+)|([A-Za-z_$][\w$]*)|"([^"]*)"|'([^']*)')\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
+    let p: RegExpExecArray | null;
+    while ((p = pairRe.exec(body)) !== null) {
+      const key = p[1] ?? p[2] ?? p[3] ?? p[4] ?? "";
+      const quoted = p[5];
+      const value = decodeEscapes(quoted.slice(1, -1));
+      if (!value || /[\u4e00-\u9fff]/.test(value)) continue; // 空串 / 已汉化
+      if (value === key) continue;                           // ② key/value 同形
+      if (!/[A-Za-z]/.test(value)) continue;
+      if (!/\s/.test(value) && !/^[A-Z]/.test(value)) continue; // ③ 不像文案
+      if (/^[\d\s.,|/+-]+\s*(ms|s|%|k|m)?$/i.test(value)) continue; // 纯数字/单位
+      out.push({ old: quoted, display: value });
+    }
+  }
+  return out;
+}
+
 function extractAutoCandidates(src: string, piCore = false): Array<{ old: string; display: string }> {
   const out: Array<{ old: string; display: string }> = [];
   const seen = new Set<string>();
@@ -791,6 +847,15 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       seen.add(quoted);
       out.push({ old: quoted, display });
     }
+  }
+
+  // 第三轮：标签对象（方案 B2）—— `const X_LABELS: Record<K, string> = { k: "显示名" }`。
+  // 设置界面右侧那一列（下拉框当前值）就来自这些 value。
+  for (const c of extractLabelObjectCandidates(src)) {
+    if (seen.has(c.old)) continue;
+    if (looksLikeToolSchemaText(src, src.indexOf(c.old))) continue;
+    seen.add(c.old);
+    out.push(c);
   }
 
   return out;
