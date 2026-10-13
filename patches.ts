@@ -621,6 +621,8 @@ type AutoContextPattern = {
   single?: "capital" | "any";
   /** 插件侧也适用本条，并且允许单词候选（见 CLASS_FIELD_PATTERNS） */
   inPlugin?: boolean;
+  /** 需要额外的作用域判据（见 DESC_SKIP_SCOPE）：只有 description 用得上 */
+  needsDescScope?: boolean;
 };
 
 const AUTO_CONTEXT_PATTERNS: AutoContextPattern[] = [
@@ -739,6 +741,91 @@ const CLASS_FIELD_PATTERNS: AutoContextPattern[] = [
   { re: /readonly\s+description\s*=\s*("(?:\\.|[^"\\])*")/g, inPlugin: true },
 ];
 
+/**
+ * `description:` 的作用域判据（仅插件侧）。
+ *
+ * 主白名单一直把插件侧的 description 排除在外 —— 因为插件里它横跨四种语义：
+ *   ① pi.registerTool(defineTool({ description }))     工具描述，给模型，绝不能汉化
+ *   ② Type.String({ description })                      参数描述，同上
+ *   ③ pi.registerCommand(name, { description })         命令说明，由 flowAutoTranslateCommands 单独处理
+ *   ④ super({ label, description })
+ *      const OPTIONS = [{ label, description }]          设置项 / 对话框选项说明，给人看，该汉化
+ *
+ * 文本本身区分不了（都是英文短句），但**调用点能**：①②③ 的前文里必有下面这些特征，
+ * 而 ④ 没有。所以用「向前看 250 字符有无这些特征」来分开。
+ * 实测：工具型插件 pi-goal-x 的 71 条里挡下 67 条，剩下 4 条正是对话框选项说明；
+ *       设置型 pi-token-speed 的 14 条里放行 13 条（含设置页那句 “Use the provider's
+ *       token count instead of this extension's counter”）。
+ */
+const DESC_SKIP_SCOPE =
+  /registerTool\(|defineTool\(|registerCommand\(|\b[A-Za-z_$][\w$]*\.(?:object|string|number|boolean|array|optional|union|literal|record|tuple|unsafe|integer|null)\s*\(|inputSchema|outputSchema|\bparameters\s*[:=]|\bproperties\s*[:=]/i;
+const DESC_SCOPE_BACK = 250;
+
+/**
+ * 找包含 pos 的最内层 `{ … }` 的体（用于看 description 所在对象里有没有 schema 字段）。
+ *
+ * 为何不能只靠「向前看 250 字符」：MCP 工具定义把 inputSchema 写在 description **后面**，
+ *     { name: "web_search", description: "…", inputSchema: { … } }
+ * 前方一点 schema 痕迹都没有，所以还得看所在对象。
+ *
+ * 为何对打包产物不可靠：正则字面量、注释、嵌套模板串都会打乱括号配平 ——
+ * 实测 pi-web-access/dist/mcp-cli.js 会把 open 定位到几十万字符之前、体长为 0。
+ * 所以只在源码文件上启用这条判据（见 collectAutoCandidates 里的 descScope），
+ * 且配平失败时返回 undefined，让调用方保守跳过。
+ */
+function enclosingObjectBody(src: string, pos: number): string | undefined {
+  const stack: number[] = [];
+  let inStr: string | undefined;
+  const skipComment = (i: number, end: number): number => {
+    if (src[i] === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      return nl === -1 ? end : nl;
+    }
+    if (src[i] === "/" && src[i + 1] === "*") {
+      const e = src.indexOf("*/", i + 2);
+      return e === -1 ? end : e + 1;
+    }
+    return i;
+  };
+  for (let i = 0; i < pos; i++) {
+    const ch = src[i];
+    if (inStr) {
+      if (ch === "\\") i++;
+      else if (ch === inStr) inStr = undefined;
+      continue;
+    }
+    const after = skipComment(i, pos);
+    if (after !== i) { i = after; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
+    if (ch === "{") stack.push(i);
+    else if (ch === "}") stack.pop();
+  }
+  const open = stack[stack.length - 1];
+  if (open === undefined) return undefined;
+  let depth = 0;
+  inStr = undefined;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (inStr) {
+      if (ch === "\\") i++;
+      else if (ch === inStr) inStr = undefined;
+      continue;
+    }
+    const after = skipComment(i, src.length);
+    if (after !== i) { i = after; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) return src.slice(open + 1, i); }
+  }
+  return undefined;
+}
+
+/** 插件侧的 description 提取规则：必须配合 DESC_SKIP_SCOPE 判据使用 */
+const PLUGIN_DESC_PATTERN: AutoContextPattern = {
+  re: /description:\s*("(?:\\.|[^"\\])*")/g,
+  needsDescScope: true,
+};
+
 function looksLikeToolSchemaText(src: string, index: number): boolean {
   const from = Math.max(0, index - TOOL_SCHEMA_WINDOW_BACK);
   return TOOL_SCHEMA_MARKERS.test(src.slice(from, index + TOOL_SCHEMA_WINDOW_FORWARD));
@@ -817,12 +904,17 @@ function extractLabelObjectCandidates(src: string): Array<{ old: string; display
   return out;
 }
 
-function extractAutoCandidates(src: string, piCore = false): Array<{ old: string; display: string }> {
+function extractAutoCandidates(
+  src: string,
+  piCore = false,
+  /** 是否启用 description 的作用域判据（打包产物上括号配平不可靠，传 false） */
+  descScope = true,
+): Array<{ old: string; display: string }> {
   const out: Array<{ old: string; display: string }> = [];
   const seen = new Set<string>();
   const patterns = piCore
     ? [...AUTO_CONTEXT_PATTERNS, ...AUTO_CONTEXT_PATTERNS_PI_ONLY, ...CLASS_FIELD_PATTERNS]
-    : [...AUTO_CONTEXT_PATTERNS, ...CLASS_FIELD_PATTERNS];
+    : [...AUTO_CONTEXT_PATTERNS, ...(descScope ? [PLUGIN_DESC_PATTERN] : []), ...CLASS_FIELD_PATTERNS];
   for (const p of patterns) {
     const re = p.re;
     const single = p.single;
@@ -835,6 +927,18 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
       // 给模型的工具/参数说明不得汉化（加了中文会改变工具调用语义）
       if (looksLikeToolSchemaText(src, m.index)) continue;
+      // description 另有一道作用域判据：
+      //   ① 向前 250 字符有工具 / schema / 命令注册特征 → 跳过
+      //   ② 所在对象体内有 schema 字段（inputSchema / parameters / Type.Xxx( …）→ 跳过
+      // ② 是为了盖住 MCP 工具定义那种「schema 写在 description 后面」的形态。
+      // 配平失败（undefined）时保守跳过 —— 宁可漏译，不可误译。
+      if (p.needsDescScope) {
+        const before = src.slice(Math.max(0, m.index - DESC_SCOPE_BACK), m.index);
+        if (DESC_SKIP_SCOPE.test(before)) continue;
+        const body = enclosingObjectBody(src, m.index);
+        if (body === undefined) continue;
+        if (DESC_SKIP_SCOPE.test(body)) continue;
+      }
       // 导出对象的成员可能既是显示文案又是逻辑校验值，不得汉化。
       // 实例：ROW_INTENT_META.other.label 既喂给 displayLabel() 显示，
       // 又被 RESERVED_LABEL_SET 拿去校验 —— 数据流跨对象与文件，纯文本体检看不见。
@@ -1108,8 +1212,11 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
     let src;
     try { src = fs.readFileSync(file, "utf8"); } catch { continue; }
     const piCore = !!distKey && path.resolve(file).toLowerCase().startsWith(distKey);
+    // 打包产物里括号配平不可靠（正则字面量 / 注释 / 嵌套模板串都会干扰），
+    // description 的作用域判据在那上面会失效，所以这类文件不启用它。
+    const descScope = !/[\\/](?:dist|bundle)[\\/]/i.test(file);
     const seenHere = autoOldsByFile.get(normPathKey(file));
-    const items = extractAutoCandidates(src, piCore).filter(
+    const items = extractAutoCandidates(src, piCore, descScope).filter(
       (c) => !staticOlds.has(c.old) && !localeOlds.has(c.old) && !seenHere?.has(c.old),
     );
     if (items.length > 0) results.push({ file, items });
