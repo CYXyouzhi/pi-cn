@@ -648,6 +648,12 @@ const AUTO_CONTEXT_PATTERNS_PI_ONLY: AutoContextPattern[] = [
   { re: /currentValue:\s*("(?:\\.|[^"\\])*")/g, single: "any" },
 ];
 
+// toggle: ["On", "Off"] —— 布尔型设置项的两个显示标签（设置界面里那个 Off）。
+// 为什么安全：format() 返回 toggle[0]/toggle[1] 用于显示，setConfig() 又用
+// `value === this.options.toggle[0]` 判断用户选中的是哪一项 —— 两边读的是同一个数组，
+// 所以替换后仍然自洽。同族的 labels 对象同理（setConfig 用 invertLabels(labels) 反查）。
+const TOGGLE_PATTERN = /\btoggle:\s*\[\s*("(?:\\.|[^"\\])*")\s*,\s*("(?:\\.|[^"\\])*")\s*\]/g;
+
 /**
  * 「显示文本参数位置」白名单（方案 B）。
  *
@@ -842,6 +848,24 @@ function extractAutoCandidates(src: string, piCore = false): Array<{ old: string
       if (isExportedMember(src, m.index + m[0].indexOf(quoted))) continue;
       // 短词（不含空格）必须在本文件内唯一：同词多处出现时无法区分
       // 哪一处是显示、哪一处是逻辑值，宁可漏译。
+      if (!/\s/.test(display) && countIn(src, quoted) > 1) continue;
+      if (seen.has(quoted)) continue;
+      seen.add(quoted);
+      out.push({ old: quoted, display });
+    }
+  }
+
+  // 第二轮附：toggle: ["On", "Off"] 两个显示标签（都是短词，同样加唯一性保护）。
+  TOGGLE_PATTERN.lastIndex = 0;
+  let tg;
+  while ((tg = TOGGLE_PATTERN.exec(src)) !== null) {
+    for (const quoted of [tg[1], tg[2]]) {
+      const display = decodeEscapes(quoted.slice(1, -1));
+      if (!display || /[\u4e00-\u9fff]/.test(display)) continue;
+      if (!/[A-Za-z]/.test(display)) continue;
+      if (display.length > MAX_DISPLAY_LENGTH) continue;
+      if (CODE_FRAGMENT.test(display)) continue;
+      if (isExportedMember(src, tg.index + tg[0].indexOf(quoted))) continue;
       if (!/\s/.test(display) && countIn(src, quoted) > 1) continue;
       if (seen.has(quoted)) continue;
       seen.add(quoted);
