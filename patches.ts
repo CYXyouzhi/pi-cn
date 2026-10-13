@@ -998,19 +998,24 @@ function extractAutoCandidates(
           // （实测 pi-goal-x 的 "disableTasks" 字面量在该文件里出现 6 次，
           //   而 `label: "disableTasks"` 只出现 1 次）。
           if (!p.fieldAnchor || !descScope) continue;
-          // 只收「标识符形态」的键名：camelCase（内部小写接大写）或 snake_case。
-          // 不加这条会大量误收，实测 label 的值在别的插件里就是参与匹配的逻辑值：
-          //   pi-tool-display  label:"read"/"grep"/"ls"/"bash"   工具名
-          //   pi-goal-x        label:"APPROVED"/"Idle"             状态枚举
-          //   pi-token-speed   label:"Slow"/"Medium"               档位名
-          // 改了它们会让工具匹配 / provider 查找 / 状态判断失效。
-          if (!/[a-z][A-Z]|_[a-z]/.test(display)) continue;
-          // 再加一道：同文件里必须有同值的 `key: "..."`。
-          // 这是「键名当显示名」的明确特征（`{ key: "x", label: "x" }`），
-          // 而 camelCase 这个形态本身不够用 —— provider 名（OpenAI / DuckDuckGo
-          // / SearXNG）与推理引擎名（vLLM）恰好也是 camelCase，收进来风险大。
-          const escaped = display.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          if (!new RegExp(`key\\s*:\\s*"${escaped}"`).test(src)) continue;
+          // 检测到的两种「设置项行」写法：
+          //   pi-goal-x/extensions/goal-settings.ts
+          //     { key: "provider", label: "provider", format: () => … }
+          //   pi-goal-x/extensions/goal-commands.ts
+          //     { key: "provider", label: "provider", section: "…", kind: "modelSelector" }
+          // 两者共同点：有 key:，并带「展示元数据」（format / section / kind）。
+          // 注意 thinking_level 那行的 key 与 label 不同值（thinkingLevel vs thinking_level），
+          // 所以不能拿「key 与 label 同值」当判据。
+          //
+          // 为何 key + 展示元数据 这个组合够用：实测能排除掉 label 值参与匹配的场景，
+          // 例如 pi-tool-display 的工具名定义：
+          //     { name: "read", label: "read", renderCall() {} }
+          // 它既没有 key: 也没有这三类元数据字段。
+          // （pi-tool-display 的 "read"/"grep"/"ls"/"bash" 均用于工具匹配，改了会坏。）
+          const body = enclosingObjectBody(src, m.index);
+          if (body === undefined) continue; // 配平失败保守跳过
+          if (!/\bkey\s*:/.test(body)) continue;
+          if (!/\b(?:format|section|kind)\s*:/.test(body)) continue;
           const anchor = m[0];
           if (countIn(src, anchor) !== 1) continue;
           if (seen.has(anchor)) continue;
