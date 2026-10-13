@@ -139,7 +139,8 @@ async function translateTexts(ctx: any, texts: string[], kind: "ui" | "command" 
           "2. 只输出中文译文本身，不要编号、不要前缀、不要解释。",
           "3. 保持简洁，一般不超过 12 个字。",
           "4. 保留技术名词（token、RPC、API 等）不翻译。",
-          "5. 禁止拆行、禁止合并、禁止输出空行。",
+          "5. 遇到 camelCase 形式的设置键名（如 autoSelectSingleGoal、subtaskDepth），翻译成对应的中文描述（如「自动选择单个目标」「子任务深度」），不要原样返回英文。",
+          "6. 禁止拆行、禁止合并、禁止输出空行。",
         ];
 
   // 统一的模型调用：负责 reasoningEffort、错误检查、剥代码围栏。

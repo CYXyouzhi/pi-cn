@@ -623,12 +623,17 @@ type AutoContextPattern = {
   inPlugin?: boolean;
   /** 需要额外的作用域判据（见 DESC_SKIP_SCOPE）：只有 description 用得上 */
   needsDescScope?: boolean;
+  /**
+   * 本 pattern 的 m[0] 带字段名（如 `label: "autoSelectSingleGoal"`），可当作替换锚点。
+   * 用于插件侧的单词候选：平时一律不收，但带上字段名后锤点唯一时就能安全替换。
+   */
+  fieldAnchor?: boolean;
 };
 
 const AUTO_CONTEXT_PATTERNS: AutoContextPattern[] = [
-  { re: /label:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)/g, single: "capital" },
-  { re: /title:\s*("(?:\\.|[^"\\])*")/g, single: "capital" },
-  { re: /placeholder:\s*("(?:\\.|[^"\\])*")/g, single: "capital" },
+  { re: /label:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`)/g, single: "capital", fieldAnchor: true },
+  { re: /title:\s*("(?:\\.|[^"\\])*")/g, single: "capital", fieldAnchor: true },
+  { re: /placeholder:\s*("(?:\\.|[^"\\])*")/g, single: "capital", fieldAnchor: true },
   { re: /ui\.notify\(\s*("(?:\\.|[^"\\])*")/g },
   { re: /ui\.confirm\(\s*("(?:\\.|[^"\\])*")/g },
   { re: /ui\.editor\(\s*("(?:\\.|[^"\\])*")/g },
@@ -948,10 +953,38 @@ function extractAutoCandidates(
       if (display.length > MAX_DISPLAY_LENGTH) continue;
       if (!/[A-Za-z]/.test(display)) continue;
       if (!/\s/.test(display)) {
-        // 单词候选：只在放行范围内、且形态符合时才收。
-        // 默认要求含空格，是为了避开逻辑值/枚举值（values:["default","none"]）。
+        // 单词候选：默认要求含空格，是为了避开逻辑值/枚举值（values:["default","none"]）。
         const mode = singleScope ? single : undefined;
-        if (!mode) continue;
+        if (!mode) {
+          // 插件侧的单词候选平时一律不收 —— label 里混着设置键名
+          // （label:"autoSelectSingleGoal"）与枚举值（label:"OpenAI"），直接替换会改坏读写。
+          //
+          // 但若该 pattern 的原始匹配带上了字段名（m[0] 形如 `label: "autoSelectSingleGoal"`），
+          // 且这个完整串在文件里唯一，就能安全替换 —— 锤点只会命中 label 那一处，
+          // 不会碰到同文件的 `key: "autoSelectSingleGoal"` 或键名清单数组
+          // （实测 pi-goal-x 的 "disableTasks" 字面量在该文件里出现 6 次，
+          //   而 `label: "disableTasks"` 只出现 1 次）。
+          if (!p.fieldAnchor || !descScope) continue;
+          // 只收「标识符形态」的键名：camelCase（内部小写接大写）或 snake_case。
+          // 不加这条会大量误收，实测 label 的值在别的插件里就是参与匹配的逻辑值：
+          //   pi-tool-display  label:"read"/"grep"/"ls"/"bash"   工具名
+          //   pi-goal-x        label:"APPROVED"/"Idle"             状态枚举
+          //   pi-token-speed   label:"Slow"/"Medium"               档位名
+          // 改了它们会让工具匹配 / provider 查找 / 状态判断失效。
+          if (!/[a-z][A-Z]|_[a-z]/.test(display)) continue;
+          // 再加一道：同文件里必须有同值的 `key: "..."`。
+          // 这是「键名当显示名」的明确特征（`{ key: "x", label: "x" }`），
+          // 而 camelCase 这个形态本身不够用 —— provider 名（OpenAI / DuckDuckGo
+          // / SearXNG）与推理引擎名（vLLM）恰好也是 camelCase，收进来风险大。
+          const escaped = display.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          if (!new RegExp(`key\\s*:\\s*"${escaped}"`).test(src)) continue;
+          const anchor = m[0];
+          if (countIn(src, anchor) !== 1) continue;
+          if (seen.has(anchor)) continue;
+          seen.add(anchor);
+          out.push({ old: anchor, display });
+          continue;
+        }
         if (mode === "capital" && !/^[A-Z]/.test(display)) continue;
       }
       if (display.includes("${")) continue; // 动态模板跳过
