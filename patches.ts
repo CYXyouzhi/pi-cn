@@ -942,6 +942,21 @@ const NON_UI_SCOPE =
 const UI_CONTAINER =
   /\bnew\s+Text\s*\(|\bnew\s+Error\s*\(|\.push\s*\(|ui\.(?:notify|confirm|select|input|editor)\s*\(|\.(?:setText|setMessage|setTitle|setStatus|setWorkingMessage|setHiddenThinkingLabel)\s*\(/;
 
+/**
+ * UI 组件的「文案属性名」白名单。
+ *
+ * 为何需要：有些界面文案既不经过 ui.notify 这类调用，也不 push 进渲染行数组，
+ * 而是作为组件 props 直接写字面量。实例（pi 本体的 MCP 提示）：
+ *     { empty: `No MCP servers configured. Add them to ${…} or .pi/mcp.json.`,
+ *       confirmLabel: "manage", cancelLabel: "close" }
+ * 单靠 UI_CONTAINER（调用点）碰不到它。
+ *
+ * 为何安全：这些属性名本身就是「文案槽位」的命名约定，值只会被渲染出来；
+ * 工具 schema 里同名的 description / properties 已被 DESC_SKIP_SCOPE 挡在前面。
+ */
+const UI_PROP =
+  /(?:^|[{,])\s*(?:empty|title|subtitle|label|message|hint|placeholder|description|note|warning|error|prompt|text|content|header|footer|emptyText|confirmLabel|cancelLabel|buttonLabel|loadingMessage|workingMessage|successMessage|errorMessage)\s*:\s*$/;
+
 function extractAutoCandidates(
   src: string,
   piCore = false,
@@ -1085,38 +1100,84 @@ function extractAutoCandidates(
     out.push(c);
   }
 
-  // 第四轮：「位置判据」—— 含空格的裸句子（见 NON_UI_SCOPE 注释）。
-  // 前三轮靠「字段名」白名单，这一轮靠「形态 + 位置」：
-  //   形态：含空格、有长度、有单词 —— 排除逻辑值与代码片段；
-  //   位置：不在日志 / schema / 工具定义 / 命令注册 / 导出对象里。
-  const plainRe = /("(?:\\.|[^"\\])*")/g;
-  let pm: RegExpExecArray | null;
-  while ((pm = plainRe.exec(src)) !== null) {
-    const quoted = pm[1];
+  // 第四轮：「位置判据」—— 含空格的裸句子与模板串（见 NON_UI_SCOPE / UI_CONTAINER / UI_PROP 注释）。
+  //
+  // 为何要先屏蔽模板串：模板串内部可能含双引号，例如
+  //     `No MCP servers configured. Add them to ${resolve10(getAgentDir(),"mcp.json")} or .pi/mcp.json.`
+  // 而正则分不清「串内的引号」与「独立字符串字面量」—— 不屏蔽的话会从串内那个引号开始匹配，
+  // 把整段模板串切碎，真正的模板文案反而收不到。
+  // 屏蔽用等长占位（\u0001），保证下标与原文一一对应。
+  const tplRe = /`(?:[^`\\]|\\.)*`/g;
+  const templates: Array<{ pos: number; text: string }> = [];
+  let tm: RegExpExecArray | null;
+  while ((tm = tplRe.exec(src)) !== null) templates.push({ pos: tm.index, text: tm[0] });
+  const masked = src.replace(tplRe, (m) => "\u0001".repeat(m.length));
+
+  /** 公共把关：位置判据 + 各种过滤。返回可收录的 display，否则 undefined */
+  const vetPlain = (quoted: string, pos: number): string | undefined => {
+    const isTemplate = quoted.startsWith("`");
     const display = decodeEscapes(quoted.slice(1, -1));
-    if (!display || display.length < 12 || display.length > MAX_DISPLAY_LENGTH) continue;
-    if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
-    if (!/\s/.test(display)) continue; // 只要含空格的（句子形态）
-    if (!/[A-Za-z]{3,}/.test(display)) continue;
-    if (display.includes("${")) continue;
-    if (CODE_FRAGMENT.test(display)) continue;
-    if (CLI_ARG_STYLE.test(display)) continue;
-    // 跨字符串误匹配的次生噪音（与扫描器同一套判据）：
-    // 打包代码的模板串含双引号，而提取只认 "…" 边界，会从模板串内部一路匹配到别处。
-    if (/[\n\r;{}<>|&\[\]]/.test(display)) continue;
-    if (/^[\s?:.,=|&)]/.test(display)) continue;
-    if (/\b(?:SELECT|INSERT|UPDATE|DELETE|CASE\s+WHEN|CREATE\s+TABLE|UNION|JOIN)\b/i.test(display)) continue;
-    if (/\bIS\s+(?:NOT\s+)?NULL\b/i.test(display)) continue; // SQL 条件片段
-    if (/^(?:[A-Z][a-z]+-)+\S*:/.test(display)) continue; // HTTP 头（Content-Length: …）
-    if (seen.has(quoted)) continue;
-    const before = src.slice(Math.max(0, pm.index - 250), pm.index);
-    if (NON_UI_SCOPE.test(before)) continue; // 日志位置
-    if (!UI_CONTAINER.test(before)) continue; // 不在显示容器 / 错误投递点附近
-    if (looksLikeToolSchemaText(src, pm.index)) continue; // schema 标记
-    if (DESC_SKIP_SCOPE.test(before)) continue; // 工具 / 命令注册作用域
-    if (isExportedMember(src, pm.index)) continue; // 导出对象成员
+    // 模板串允许含 ${...}，但长度/形态要按「去掉插值后的静态文本」判断，
+    // 否则 `${a}${b}` 这种空壳也会被当成文案收进来。
+    const staticText = isTemplate ? display.replace(/\$\{[^}]*\}/g, "") : display;
+    // 全部文本判据一律用 staticText（= 模板串去掉插值后的部分）。
+    // 为何不能用 display：插值里是合法代码，会被下面这些「像代码吗」的判据误伤 ——
+    // 实测 MCP 那条 `No MCP servers configured. Add them to ${resolve(getAgentDir(),"mcp.json")} or …`
+    // 同时命中 CODE_FRAGMENT 的 `\)\s*,` 与「含 {}」的噪音判据，结果整条收不到。
+    // 模板串的门槛比普通字面量高：它的静态文本更短更碎，
+    // 低门槛会把大量「给模型的工具输出」也收进来（如 `Continue with cursor="${…}"`）。
+    // 普通字面量 12 字就够（它已经过位置判据），模板串要 20 字。
+    const minLen = isTemplate ? 20 : 12;
+    if (!staticText || staticText.trim().length < minLen) return undefined;
+    if (staticText.length > MAX_DISPLAY_LENGTH) return undefined;
+    if (/[\u4e00-\u9fff]/.test(staticText)) return undefined; // 已汉化
+    if (!/\s/.test(staticText)) return undefined; // 只要含空格的（句子形态）
+    if (!/[A-Za-z]{3,}/.test(staticText)) return undefined;
+    if (!isTemplate && staticText.includes("${")) return undefined; // 非模板串里的 ${ 是拼装碎片
+    if (CODE_FRAGMENT.test(staticText)) return undefined;
+    if (CLI_ARG_STYLE.test(staticText)) return undefined;
+    // 跨字符串误匹配的次生噪音（与扫描器同一套判据）
+    if (/[\n\r;{}<>|&\[\]]/.test(staticText)) return undefined;
+    if (/^[\s?:.,=|&)]/.test(staticText)) return undefined;
+    if (/\b(?:SELECT|INSERT|UPDATE|DELETE|CASE\s+WHEN|CREATE\s+TABLE|UNION|JOIN)\b/i.test(staticText)) return undefined;
+    if (/\bIS\s+(?:NOT\s+)?NULL\b/i.test(staticText)) return undefined;
+    if (/^(?:[A-Z][a-z]+-)+\S*:/.test(staticText)) return undefined; // HTTP 头
+    if (seen.has(quoted)) return undefined;
+    const before = src.slice(Math.max(0, pos - 250), pos);
+    if (NON_UI_SCOPE.test(before)) return undefined; // 日志位置
+    // 位置判据分两档：
+    //   普通字面量 —— UI_CONTAINER（调用点）或 UI_PROP（文案属性）任一即可；
+    //   模板串 —— 必须命中 UI_PROP。
+    // 为何模板串要更严：pi 的工具输出（给模型看）也写成模板串并 push 进数组，
+    // 与 UI 提示在源码里形态完全相同，只有「属性名是不是文案槽位」能分开。
+    // 实例：`Empty: ${n}` 是 UI（empty: 槽位），
+    //       `Continue with cursor="${…}"` 是工具输出（返回值/数组元素，没有文案属性名）。
+    if (isTemplate ? !UI_PROP.test(before) : !UI_CONTAINER.test(before) && !UI_PROP.test(before)) {
+      return undefined;
+    }
+    if (looksLikeToolSchemaText(src, pos)) return undefined; // schema 标记
+    if (DESC_SKIP_SCOPE.test(before)) return undefined; // 工具 / 命令注册作用域
+    if (isExportedMember(src, pos)) return undefined; // 导出对象成员
+    return display;
+  };
+
+  // 4a）双引号 / 单引号字面量（跑在 masked 上，从而跳掉模板串内部）
+  const plainRe = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = plainRe.exec(masked)) !== null) {
+    const quoted = src.slice(pm.index, pm.index + pm[0].length);
+    const display = vetPlain(quoted, pm.index);
+    if (display === undefined) continue;
     seen.add(quoted);
     out.push({ old: quoted, display });
+  }
+
+  // 4b）模板串本身
+  for (const { pos, text } of templates) {
+    const display = vetPlain(text, pos);
+    if (display === undefined) continue;
+    seen.add(text);
+    out.push({ old: text, display });
   }
 
   return out;
