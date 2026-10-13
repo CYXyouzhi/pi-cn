@@ -1,14 +1,23 @@
 {
   "name": "pi-cn",
-  "version": "0.3.0",
-  "description": "Pi 中文汉化：/ 命令补全中文说明 + 使用频率排序 + 界面文本自动汉化（英文选项保留，注释变中文）",
+  "version": "0.4.0",
+  "description": "Pi 中文汉化：/ 命令补全中文说明 + 界面文本自动汉化。双轨制：优先采用插件官方语言包（零 token），无语言包者走模型翻译；英文原文保留、括号内加中文注释。",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CYXyouzhi/pi-cn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CYXyouzhi/pi-cn/issues"
+  },
+  "homepage": "https://github.com/CYXyouzhi/pi-cn#readme",
   "keywords": [
     "pi-package",
     "pi-extension",
     "chinese",
     "i18n",
+    "localization",
     "hanhua",
     "汉化"
   ],
