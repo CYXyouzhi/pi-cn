@@ -115,7 +115,8 @@ async function flowScanInterface(ctx: any): Promise<void> {
         return `  ${String(a).padStart(4)}  ${f.split(/[\\/]/).slice(-2).join("/")}`;
       }),
     "",
-    "提示：优先看 A 级；B 级多为键名与枚举值，多数不必动。",
+    "提示：这是原始候选池（含内部消息、日志、给模型的文本），并非待办清单。",
+    "若只想确认「有没有该汉化但漏掉的」，直接跑 /汉化 自动 —— 它自带位置判据。",
   ];
   ctx.ui.notify(head.join("\n"), "info");
 }

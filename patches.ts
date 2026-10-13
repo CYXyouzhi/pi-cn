@@ -909,6 +909,39 @@ function extractLabelObjectCandidates(src: string): Array<{ old: string; display
   return out;
 }
 
+/**
+ * 「位置判据」：含空格的裸句子，只要不在日志 / schema / 工具定义位置，就收。
+ *
+ * 为何现在才敢收裸字符串：
+ *   过去只按「字段名」白名单收（label: / description: / ui.*），导致大量裸字符串
+ *   全部漏掉 —— 而它们恰恰是用户能看到的提示与错误文案：
+ *       theme.fg("dim", "Pi can explain its own features…")
+ *       lines.push("  No sessions found")
+ *       new Error("Could not extract YouTube video content…")
+ *
+ * 为何含空格是强信号：
+ *   参与逻辑的值（枚举、设置键名、提供商标识、工具名）几乎不含空格，
+ *   而给人看的句子几乎都含空格 —— 两边天然分得开。
+ *   再叠一层「位置排除」，就能在「不漏」与「不误译」之间取得平衡。
+ *
+ * 为何位置排除是安全的：
+ *   日志文本翻了对用户无害（它本来就看不见），而真正的风险点是
+ *   「工具 / schema 位置」（翻了会改变模型看到的语义）—— 那两类已经在
+ *   looksLikeToolSchemaText 与 DESC_SKIP_SCOPE 里排掉了。
+ */
+const NON_UI_SCOPE =
+  /console\.(?:log|warn|error|info|debug|trace)\s*\(|logger\.(?:debug|info|warn|error|trace)\s*\(|\blog\.(?:debug|info|warn|error)\s*\(|\bdebug\s*\(/;
+
+/**
+ * 明确的「显示容器 / 错误投递点」。
+ * 第四轮只收这些位置附近的句子 —— 实测靠「排除法」（非日志即收）会收进 1966 条，
+ * 绝大多数是用户根本看不到的内部错误消息，白花 token；
+ * 换成正面位置判据后数量落到合理范围，而且每条都是真会被渲染出来的。
+ * 含空格这一层仍然保留：枚举 / 键名 / 标识符几乎不含空格，天然分开。
+ */
+const UI_CONTAINER =
+  /\bnew\s+Text\s*\(|\bnew\s+Error\s*\(|\.push\s*\(|ui\.(?:notify|confirm|select|input|editor)\s*\(|\.(?:setText|setMessage|setTitle|setStatus|setWorkingMessage|setHiddenThinkingLabel)\s*\(/;
+
 function extractAutoCandidates(
   src: string,
   piCore = false,
@@ -1045,6 +1078,40 @@ function extractAutoCandidates(
     if (looksLikeToolSchemaText(src, src.indexOf(c.old))) continue;
     seen.add(c.old);
     out.push(c);
+  }
+
+  // 第四轮：「位置判据」—— 含空格的裸句子（见 NON_UI_SCOPE 注释）。
+  // 前三轮靠「字段名」白名单，这一轮靠「形态 + 位置」：
+  //   形态：含空格、有长度、有单词 —— 排除逻辑值与代码片段；
+  //   位置：不在日志 / schema / 工具定义 / 命令注册 / 导出对象里。
+  const plainRe = /("(?:\\.|[^"\\])*")/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = plainRe.exec(src)) !== null) {
+    const quoted = pm[1];
+    const display = decodeEscapes(quoted.slice(1, -1));
+    if (!display || display.length < 12 || display.length > MAX_DISPLAY_LENGTH) continue;
+    if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
+    if (!/\s/.test(display)) continue; // 只要含空格的（句子形态）
+    if (!/[A-Za-z]{3,}/.test(display)) continue;
+    if (display.includes("${")) continue;
+    if (CODE_FRAGMENT.test(display)) continue;
+    if (CLI_ARG_STYLE.test(display)) continue;
+    // 跨字符串误匹配的次生噪音（与扫描器同一套判据）：
+    // 打包代码的模板串含双引号，而提取只认 "…" 边界，会从模板串内部一路匹配到别处。
+    if (/[\n\r;{}<>|&\[\]]/.test(display)) continue;
+    if (/^[\s?:.,=|&)]/.test(display)) continue;
+    if (/\b(?:SELECT|INSERT|UPDATE|DELETE|CASE\s+WHEN|CREATE\s+TABLE|UNION|JOIN)\b/i.test(display)) continue;
+    if (/\bIS\s+(?:NOT\s+)?NULL\b/i.test(display)) continue; // SQL 条件片段
+    if (/^(?:[A-Z][a-z]+-)+\S*:/.test(display)) continue; // HTTP 头（Content-Length: …）
+    if (seen.has(quoted)) continue;
+    const before = src.slice(Math.max(0, pm.index - 250), pm.index);
+    if (NON_UI_SCOPE.test(before)) continue; // 日志位置
+    if (!UI_CONTAINER.test(before)) continue; // 不在显示容器 / 错误投递点附近
+    if (looksLikeToolSchemaText(src, pm.index)) continue; // schema 标记
+    if (DESC_SKIP_SCOPE.test(before)) continue; // 工具 / 命令注册作用域
+    if (isExportedMember(src, pm.index)) continue; // 导出对象成员
+    seen.add(quoted);
+    out.push({ old: quoted, display });
   }
 
   return out;
