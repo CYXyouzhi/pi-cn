@@ -947,7 +947,7 @@ function enumeratePluginFiles(): string[] {
   return [...new Set([...files, ...collectPiDistFiles()])];
 }
 
-function readAutoMap(): Record<string, Array<[string, string]>> {
+export function readAutoMap(): Record<string, Array<[string, string]>> {
   try {
     const p = JSON.parse(fs.readFileSync(AUTO_FILE, "utf8"));
     if (p && typeof p === "object") return p as Record<string, Array<[string, string]>>;
@@ -960,12 +960,28 @@ function writeAutoMap(map: Record<string, Array<[string, string]>>): void {
   fs.writeFileSync(AUTO_FILE, JSON.stringify(map, null, 2) + "\n", "utf8");
 }
 
+/** 路径归一化：用于把映射表的 key 与扫描到的文件路径对上（大小写/斜杠差异） */
+function normPathKey(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
+
 export function collectAutoCandidates(): Array<{ file: string; items: Array<{ old: string; display: string }> }> {
   const files = enumeratePluginFiles();
   const staticOlds = new Set(ALL_HANHUA_PAIRS.map(([old]) => old));
   const autoMap = readAutoMap();
-  const autoOlds = new Set(Object.values(autoMap).flat().map(([old]) => old));
+  // 按「文件」建已记录集合，而不是用一个全局集合。
+  //
+  // 原来用全局集合时只有先扫到的那个文件会被记录，其余文件永远得不到替换：
+  //   "Display mode" 既在 pi-token-speed/src/commands.ts 的命令说明里，
+  //   也在 src/settings/items/display.ts 的 label 里；
+  //   先扫到 commands.ts 并记录后，display.ts 的那份就被过滤掉了，
+  //   于是设置界面里这一项永远是英文。
+  const autoOldsByFile = new Map<string, Set<string>>();
+  for (const [f, pairs] of Object.entries(autoMap)) {
+    autoOldsByFile.set(normPathKey(f), new Set(pairs.map(([old]) => old)));
+  }
   // 语言包已覆盖的英文不进模型翻译队列：作者已经给了官方中文，重复翻译既费 token 又可能译法不一致。
+  // 这条是全局生效的（与文件无关），因为语言包本身就是全插件的方案。
   const localeOlds = new Set(Object.values(readLocaleMaps()).flat().map(([old]) => old));
   const results: Array<{ file: string; items: Array<{ old: string; display: string }> }> = [];
   // pi 本体路径只算一次：findPiDist 会遍历 argv 与若干候选目录，放进循环里会明显变慢。
@@ -975,7 +991,10 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
     let src;
     try { src = fs.readFileSync(file, "utf8"); } catch { continue; }
     const piCore = !!distKey && path.resolve(file).toLowerCase().startsWith(distKey);
-    const items = extractAutoCandidates(src, piCore).filter((c) => !staticOlds.has(c.old) && !autoOlds.has(c.old) && !localeOlds.has(c.old));
+    const seenHere = autoOldsByFile.get(normPathKey(file));
+    const items = extractAutoCandidates(src, piCore).filter(
+      (c) => !staticOlds.has(c.old) && !localeOlds.has(c.old) && !seenHere?.has(c.old),
+    );
     if (items.length > 0) results.push({ file, items });
   }
   return results;

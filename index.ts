@@ -32,6 +32,7 @@ import {
   collectAutoCandidates,
   applyAutoPairs,
   saveAutoPairs,
+  readAutoMap,
   applyLocalePatches,
   revertAllPatches,
   type PatchResult,
@@ -257,24 +258,42 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
     );
     return;
   }
-  ctx.ui.notify(`发现 ${allItems.length} 条界面文本，正在用当前模型翻译…`, "info");
-
-  const cns = await translateTexts(ctx, allItems.map((i) => i.display));
-  if (!cns.ok) {
-    ctx.ui.notify(`翻译失败：${cns.reason}`, "error");
-    return;
+  // 复用历史译文：同一文案常出现在多个文件（display.ts 的 label 与 commands.ts 的说明里
+  // 都有 "Display mode"）。之前翻过的直接拿来用 —— 既省一次模型调用，
+  // 也保证同一句话在所有文件里译法一致。
+  const known: Record<string, string> = {};
+  for (const pairs of Object.values(readAutoMap())) {
+    for (const [old, nw] of pairs) known[old] = nw;
   }
-  const lines = cns.lines;
+  const unknown = allItems.filter((i) => !known[i.old]);
 
-  let idx = 0;
+  if (unknown.length > 0) {
+    ctx.ui.notify(
+      `发现 ${allItems.length} 条界面文本（复用已有译文 ${allItems.length - unknown.length} 条），` +
+        `正在翻译 ${unknown.length} 条…`,
+      "info",
+    );
+    const cns = await translateTexts(ctx, unknown.map((i) => i.display));
+    if (!cns.ok) {
+      ctx.ui.notify(`翻译失败：${cns.reason}`, "error");
+      return;
+    }
+    unknown.forEach((item, i) => {
+      const cn = (cns.lines[i] ?? "").trim();
+      if (cn && cn !== item.display) known[item.old] = withAnnotation(item.old, cn);
+    });
+  } else {
+    ctx.ui.notify(`发现 ${allItems.length} 条界面文本，全部复用已有译文。`, "info");
+  }
+
   let applied = 0;
   const errors: string[] = [];
   for (const r of results) {
     const pairs: Array<[string, string]> = [];
     for (const item of r.items) {
-      const cn = (lines[idx++] ?? "").trim();
-      if (!cn || cn === item.display) continue;
-      pairs.push([item.old, withAnnotation(item.old, cn)]);
+      const nw = known[item.old];
+      if (!nw || nw === item.old) continue;
+      pairs.push([item.old, nw]);
     }
     if (pairs.length === 0) continue;
     const res = applyAutoPairs(r.file, pairs);
