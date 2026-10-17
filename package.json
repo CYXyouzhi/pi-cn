@@ -1,6 +1,6 @@
 {
   "name": "pi-cn",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Pi 中文汉化：/ 命令补全中文说明 + 界面文本自动汉化。双轨制：优先采用插件官方语言包（零 token），无语言包者走模型翻译；英文原文保留、括号内加中文注释。",
   "type": "module",
   "license": "MIT",

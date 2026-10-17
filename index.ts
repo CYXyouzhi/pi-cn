@@ -24,7 +24,7 @@ import {
 import {
   applyAllPatches,
   collectAutoCandidates,
-  applyAutoPairs,
+  applyAutoPairsResilient,
   saveAutoPairs,
   readAutoMap,
   applyLocalePatches,
@@ -58,8 +58,14 @@ function collectResults(all: ReturnType<typeof applyAllPatches>) {
 }
 
 // ---------- /汉化 自动：扫描 + 翻译 + 应用 ----------
+// 译文里出现引号 / 反斜杠 / 模板占位符，插进源码的字符串字面量里会直接破坏语法：
+//   例如模型把 "Don't show" 译成含单引号的句子 → 所在字面量被提前闭合 → 整文件被语法校验证否 → 全部丢弃。
+// 中文界面本来也用不上这几个 ASCII 符号（中文引号「」不在过滤范围），全部剔除。
+function sanitizeCn(cn: string): string {
+  return cn.replace(/[\\`"']/g, "").replace(/\$\{/g, "").trim();
+}
 function withAnnotation(old: string, cn: string): string {
-  return old.slice(0, -1) + `（${cn}）` + old.slice(-1);
+  return old.slice(0, -1) + `（${sanitizeCn(cn)}）` + old.slice(-1);
 }
 
 type TranslateResult = { ok: true; lines: string[] } | { ok: false; reason: string };
@@ -241,6 +247,7 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
   }
 
   let applied = 0;
+  let dropped = 0;
   const errors: string[] = [];
   for (const r of results) {
     const pairs: Array<[string, string]> = [];
@@ -250,12 +257,19 @@ async function flowAutoTranslate(ctx: any): Promise<void> {
       pairs.push([item.old, nw]);
     }
     if (pairs.length === 0) continue;
-    const res = applyAutoPairs(r.file, pairs);
+    // 用「剔坏保好」版本：整批被语法校验证否时二分定位坏条目，其余照常落盘。
+    // 为何不用 applyAutoPairs：它是整文件一次性替换，一条坏候选（多是扫描误抓的代码残片）
+    // 会连坐同文件其余几十上百条，且失败批次不入表，下次重译重失败 —— 永远汉化不上。
+    const res = applyAutoPairsResilient(r.file, pairs);
     if (res.error) errors.push(res.error);
     if (res.hits > 0) {
       applied += res.hits;
       saveAutoPairs(r.file, pairs);
     }
+    dropped += res.dropped.length;
+  }
+  if (dropped > 0) {
+    ctx.ui.notify(`已跳过 ${dropped} 条非界面文本候选（已记入黑名单，不再重复翻译）。`, "info");
   }
   if (errors.length > 0) {
     ctx.ui.notify(`⚠️ 部分失败：${errors.join("；")}`, "warning");

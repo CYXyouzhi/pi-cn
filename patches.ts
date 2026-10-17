@@ -272,14 +272,30 @@ function syntaxCheck(file: string, src: string): string | undefined {
       execFileSync(process.execPath, ["--check", tmp], { stdio: "pipe" });
       return undefined; // 任一种解析方式通过即视为语法合法
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      results.push(msg.split("\n").slice(0, 3).join(" ").slice(0, 140));
+      results.push(syntaxErrorDetail(e));
     } finally {
       try { fs.unlinkSync(tmp); } catch { /* 忽略 */ }
     }
   }
   // 两种都失败才判定为语法错误（取第一条信息）
   return results[0] ?? "语法校验失败";
+}
+
+// 从 node --check 的失败里抠出真正有用的信息（SyntaxError 那几行 + 出错位置）。
+// 为什么需要：原来取 execFileSync 的整段 message 再截断 140 字符，
+// 结果「Command failed: <一长串临时文件路径>」把真正的 SyntaxError 挤出了视野——
+// 用户只看到「chunk-XXX.js 语法校验失败」，看不到错在哪、为什么错，等于没报错。
+function syntaxErrorDetail(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const err = e as { stderr?: string | Buffer };
+  const stderr = (typeof err.stderr === "string" ? err.stderr : err.stderr?.toString() ?? "").trim();
+  // 有 stderr 就用 stderr；没有才退回 message（并剥掉无信息量的 Command failed 头）
+  const text = stderr || raw.replace(/^Command failed:[^\n]*\n?/, "");
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !/^at\s/.test(l) && !/^\^+$/.test(l));
+  return lines.slice(0, 4).join(" ").slice(0, 400) || "语法校验失败";
 }
 
 // ---------- 备份：文件名带包版本 ----------
@@ -398,8 +414,11 @@ function ensureBackup(file: string, src: string): void {
   if (!CJK_RE.test(src)) fs.copyFileSync(file, target);
 }
 
-function applyToFile(p: string, pairs: Array<[string, string]>): { hits: number; error?: string } {
-  let src = fs.readFileSync(p, "utf8");
+// 纯函数：把 pairs 应用到 src，返回替换后的文本与命中数（不碰磁盘）。
+// 为何抽出来：防连坐需要「先试算、再决定写不写」，而原来的替换逻辑与写盘绑在
+// applyToFile 里，无法只试算（试算正是二分定位坏条目的手段）。
+function buildPatched(src: string, pairs: Array<[string, string]>): { text: string; hits: number } {
+  let text = src;
   let hits = 0;
   // 长 key 优先：避免短 key 命中长 key 的前缀。
   // 例："Unknown error" 会把 "Unknown error occurred" 误伤成 "未知错误 occurred"。
@@ -409,31 +428,76 @@ function applyToFile(p: string, pairs: Array<[string, string]>): { hits: number;
   // "Thinking Level" 又命中其中的 "Thinking Level"，得到
   // "Thinking Level（思考级别） for（思考级别）" 这种双重嵌套。
   const slots: string[] = [];
-  const before = src; // 初始内容，用于幂等判定
   for (const [old, nw] of sorted) {
     // 幂等保护：若 new 已存在于「初始文件」则跳过，避免重复叠加。
-    // 必须用 before 而不是 src：同一文件内多条映射可能相互包含，
+    // 必须用 src（初始内容）而不是 text：同一文件内多条映射可能相互包含，
     // 例如长条目刚写入 "Could not refresh（无法刷新） "，
-    // 短条目 "Could not refresh " 检查中间态 src 就会误以为已汉化而跳过。
-    if (src.includes(old) && !before.includes(nw)) {
+    // 短条目 "Could not refresh " 检查中间态 text 就会误以为已汉化而跳过。
+    if (text.includes(old) && !src.includes(nw)) {
       const ph = "\u0000" + slots.length + "\u0000";
-      src = src.split(old).join(ph);
+      text = text.split(old).join(ph);
       slots.push(nw);
       hits++;
     }
   }
-  if (slots.length > 0) src = src.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[Number(i)]);
+  if (slots.length > 0) text = text.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[Number(i)]);
+  return { text, hits };
+}
+
+function applyToFile(p: string, pairs: Array<[string, string]>): { hits: number; error?: string } {
+  const before = fs.readFileSync(p, "utf8"); // 初始内容，用于幂等判定
+  const { text, hits } = buildPatched(before, pairs);
   if (hits === 0) return { hits: 0 };
 
   // 先校验后写盘：失败时文件根本没被碰过，无需回滚
-  const err = syntaxCheck(p, src);
+  const err = syntaxCheck(p, text);
   if (err) {
     return { hits: 0, error: path.basename(p) + " 语法校验失败，已放弃：" + err };
   }
 
   ensureBackup(p, before);
-  fs.writeFileSync(p, src, "utf8");
+  fs.writeFileSync(p, text, "utf8");
   return { hits };
+}
+
+// 二分定位：把「加上就语法错误」的条目从批次里剔出去，返回可安全应用的子集。
+// 递归方式：先整批试算（只是校验，不写盘）；失败则对半分，左边先确定可用，
+// 再以「左边已应用」的内容为基准试右边 —— 这样组合效果也被真实校验，不会错放。
+function refineOk(
+  file: string,
+  base: string,
+  pairs: Array<[string, string]>,
+  dropped: Array<[string, string]>,
+): string {
+  if (pairs.length === 0) return base;
+  const { text } = buildPatched(base, pairs);
+  if (syntaxCheck(file, text) === undefined) return text; // 整批可用
+  if (pairs.length === 1) { dropped.push(pairs[0]); return base; } // 单条也不可用 → 丢
+  const mid = Math.ceil(pairs.length / 2);
+  const afterLeft = refineOk(file, base, pairs.slice(0, mid), dropped);
+  return refineOk(file, afterLeft, pairs.slice(mid), dropped);
+}
+
+// 自动汉化专用：整批被语法校验拦下时，剔掉坏条目、其余照常落盘。
+// 为何必需：applyToFile 是「整文件一次性替换」，一条坏候选会连坐同文件其余几十上百条，
+// 而且因为 hits=0，失败批次不会被记入映射表，下次 /汉化 自动 会原样重演 —— 永远汉化不上。
+// 安全性：返回前仍然用 applyToFile 对「剔完之后的整批」重新校验并写盘，
+// 所以不变式不变 —— 只有整批能通过语法校验的才会写盘。
+export function applyAutoPairsResilient(
+  file: string,
+  pairs: Array<[string, string]>,
+): { hits: number; dropped: Array<[string, string]>; error?: string } {
+  const first = applyToFile(file, pairs);
+  if (!first.error) return { hits: first.hits, dropped: [] };
+  const src = fs.readFileSync(file, "utf8");
+  const dropped: Array<[string, string]> = [];
+  refineOk(file, src, pairs, dropped);
+  if (dropped.length === 0) return { hits: 0, error: first.error }; // 理论上不会发生
+  const droppedKeys = new Set(dropped.map(([old]) => old));
+  const retry = applyToFile(file, pairs.filter(([old]) => !droppedKeys.has(old)));
+  if (retry.error) return { hits: 0, dropped, error: retry.error };
+  saveDroppedKeys(file, [...droppedKeys]);
+  return { hits: retry.hits, dropped };
 }
 
 function applyOneFile(p: string | undefined, pairs: Array<[string, string]>, label: string): PatchResult {
@@ -695,11 +759,32 @@ const UI_CALL_PATTERNS: RegExp[] = [
 
 // 明显的代码残片（正则跨引号匹配时的副产物，不是文案）：
 //   "),theme.fg(" / ";function makeX(...)" / "+memberName+"
-const CODE_FRAGMENT = /=>|\bfunction\b|\btheme\.|^\s*[;)]|\)\s*,|^\s*\+|\+\s*$/;
+// 补代码关键词：UI 文案里不可能出现 throw / new Xxx( / return 这类结构。
+// 实例（漏网的那条）："')throw new Error(" ← 从 Cookie 解析代码里跨引号抓出来的残片。
+const CODE_FRAGMENT = /=>|\bfunction\b|\btheme\.|\bthrow\b|\bnew\s+[A-Za-z_$][\w$]*\s*\(|\breturn\b|^\s*[;)]|\)\s*,|^\s*\+|\+\s*$/;
+
+// 候选的引号必须是这个字符串字面量的真实边界：外侧不能紧邻另一个引号，也不能落在标识符里。
+// 为什么单列一条：正则跨引号匹配会产出「看起来完全合法的字面量」残片，语法上成立，
+// 只有看边界才识破。实例（chunk-66G7ITPS.js 的 Cookie 值解析）：
+//   if(value[0]==='"'){if(len===1||value[len-1]!=='"')throw new Error("Invalid cookie value");
+//                         ↑ 正则从这个双引号起匹配，抓到 "')throw new Error("
+// 插入中文后变成 throw new Error(（…）"Invalid cookie value" → 括号落在代码里 → 整个主 chunk 被放弃。
+const QUOTE_CHARS = "\"'`";
+function crossesQuoteBoundary(src: string, quoted: string, at: number): boolean {
+  const before = src[at - 1] ?? "";
+  const after = src[at + quoted.length] ?? "";
+  const idChar = /[A-Za-z0-9_$]/;
+  return QUOTE_CHARS.includes(before) || QUOTE_CHARS.includes(after) || idChar.test(before) || idChar.test(after);
+}
 // UI 文案极少超 160 字符，超过的基本是整段代码或模板残片。
 const MAX_DISPLAY_LENGTH = 160;
 
 const AUTO_FILE = path.join(homedir(), ".pi", "agent", "hanhua-auto.json");
+
+// 被语法校验判定为「不是文案、是代码」的候选黑名单（与汉化映射分开存）。
+// 为何要单独存而不是塞回 hanhua-auto.json：加了映射的字符串在下次启动时会被当成
+// 待汉化文本重新应用，坏的照样会坏；而黑名单只影响「扫描候选」这一步，不参与应用。
+const DROP_FILE = path.join(homedir(), ".pi", "agent", "hanhua-dropped.json");
 
 // 判断一处字符串是否位于「给模型的工具/参数 schema」里，而不是给人看的界面位置。
 //
@@ -978,6 +1063,8 @@ function extractAutoCandidates(
       const quoted = m[1];
       const display = decodeEscapes(quoted.slice(1, -1));
       if (/[\u4e00-\u9fff]/.test(display)) continue; // 已汉化
+      // 引号边界：跨引号匹配出来的残片（形如 "')throw new Error("）必须在这里拦掉
+      if (crossesQuoteBoundary(src, quoted, m.index + m[0].indexOf(quoted))) continue;
       // 给模型的工具/参数说明不得汉化（加了中文会改变工具调用语义）
       if (looksLikeToolSchemaText(src, m.index)) continue;
       // description 另有一道作用域判据：
@@ -1057,6 +1144,7 @@ function extractAutoCandidates(
       const quoted = m[1];
       const display = decodeEscapes(quoted.slice(1, -1));
       if (!display || /[\u4e00-\u9fff]/.test(display)) continue; // 空串 / 已汉化
+      if (crossesQuoteBoundary(src, quoted, m.index + m[0].indexOf(quoted))) continue;
       if (display.includes("${")) continue;
       if (!/[A-Za-z]/.test(display)) continue;
       if (display.length > MAX_DISPLAY_LENGTH) continue;
@@ -1080,6 +1168,7 @@ function extractAutoCandidates(
     for (const quoted of [tg[1], tg[2]]) {
       const display = decodeEscapes(quoted.slice(1, -1));
       if (!display || /[\u4e00-\u9fff]/.test(display)) continue;
+      if (crossesQuoteBoundary(src, quoted, tg.index + tg[0].indexOf(quoted))) continue;
       if (!/[A-Za-z]/.test(display)) continue;
       if (display.length > MAX_DISPLAY_LENGTH) continue;
       if (CODE_FRAGMENT.test(display)) continue;
@@ -1342,6 +1431,30 @@ export function readAutoMap(): Record<string, Array<[string, string]>> {
   return {};
 }
 
+// 黑名单：文件路径 → 被判定为代码残片的候选 key
+function readDropped(): Record<string, string[]> {
+  try {
+    const p = JSON.parse(fs.readFileSync(DROP_FILE, "utf8"));
+    if (p && typeof p === "object") return p as Record<string, string[]>;
+  } catch { /* 无 */ }
+  return {};
+}
+
+function writeDropped(map: Record<string, string[]>): void {
+  fs.mkdirSync(path.dirname(DROP_FILE), { recursive: true });
+  fs.writeFileSync(DROP_FILE, JSON.stringify(map, null, 2) + "\n", "utf8");
+}
+
+/** 把一批候选记入黑名单（去重）——否则每次 /汉化 自动 都会重译同一批、复发同一条警告 */
+function saveDroppedKeys(file: string, keys: string[]): void {
+  if (keys.length === 0) return;
+  const map = readDropped();
+  const exist = new Set(map[normPathKey(file)] ?? []);
+  for (const k of keys) exist.add(k);
+  map[normPathKey(file)] = [...exist];
+  writeDropped(map);
+}
+
 function writeAutoMap(map: Record<string, Array<[string, string]>>): void {
   fs.mkdirSync(path.dirname(AUTO_FILE), { recursive: true });
   fs.writeFileSync(AUTO_FILE, JSON.stringify(map, null, 2) + "\n", "utf8");
@@ -1370,6 +1483,8 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
   // 语言包已覆盖的英文不进模型翻译队列：作者已经给了官方中文，重复翻译既费 token 又可能译法不一致。
   // 这条是全局生效的（与文件无关），因为语言包本身就是全插件的方案。
   const localeOlds = new Set(Object.values(readLocaleMaps()).flat().map(([old]) => old));
+  // 黑名单（被语法校验证否过的代码残片）：不再送模型翻译，也不再应用
+  const droppedMap = readDropped();
   const results: Array<{ file: string; items: Array<{ old: string; display: string }> }> = [];
   // pi 本体路径只算一次：findPiDist 会遍历 argv 与若干候选目录，放进循环里会明显变慢。
   const dist = findPiDist();
@@ -1382,8 +1497,9 @@ export function collectAutoCandidates(): Array<{ file: string; items: Array<{ ol
     // description 的作用域判据在那上面会失效，所以这类文件不启用它。
     const descScope = !/[\\/](?:dist|bundle)[\\/]/i.test(file);
     const seenHere = autoOldsByFile.get(normPathKey(file));
+    const droppedHere = new Set(droppedMap[normPathKey(file)] ?? []);
     const items = extractAutoCandidates(src, piCore, descScope).filter(
-      (c) => !staticOlds.has(c.old) && !localeOlds.has(c.old) && !seenHere?.has(c.old),
+      (c) => !staticOlds.has(c.old) && !localeOlds.has(c.old) && !seenHere?.has(c.old) && !droppedHere.has(c.old),
     );
     if (items.length > 0) results.push({ file, items });
   }
@@ -1514,5 +1630,8 @@ export function revertAllPatches(): { restored: number; files: string[]; skipped
     stale += listBackups(file).length;
   }
   try { fs.unlinkSync(MARKER_FILE); } catch { /* 无标记 */ }
+  // 清除汉化 = 回到「未汉化」状态，黑名单也得一并清掉：
+  // 否则下次 /汉化 自动 会永远跳过那些被历史误判的候选（而它们可能只是当时译文有问题）。
+  try { fs.unlinkSync(DROP_FILE); } catch { /* 无黑名单 */ }
   return { restored, files, skipped, stale };
 }
